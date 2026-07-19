@@ -231,6 +231,7 @@ ai-voice-input/
 5. **entitlements**:ad-hoc 阶段不带任何 entitlement 文件(restricted entitlement + ad-hoc = AMFI SIGKILL,spike 6 实测);`com.apple.security.device.audio-input` 是 Hardened-Runtime 签名(§6,Developer ID 后)才需要的,本地 dev 阶段 TCC 只看 Info.plist 的 usage description。
 6. 测试:`swift test`(SwiftPM 原生 test target)。
 7. **dev-loop TCC 事实(FINDINGS §2.4/§4)**:ad-hoc .app 的 Accessibility 授权按 cdhash 记账,**每次重建失效**;但**从已授权的 Terminal 直接跑二进制**会继承 Terminal 的授权且跨重签/改路径保留 → M3 起开发迭代用「Terminal 直跑」,只在验收时用 `open dist/*.app`。
+8. **Background-session `open` 启动的 app 是 SIGSTOP 停着的**(launch record `LSStoppedState=true`,`ps stat=T`,实测 M0):agent 自动化验收必须 `kill -CONT <pid>` 才开始执行;owner 从 GUI Terminal `open` 不受影响。另:zsh 有内置 `log` 命令,读 unified log 要用 `/usr/bin/log`;os.Logger 的 `.info` 不落盘,自动化验证用 `/usr/bin/log stream`(不是 `log show`)。
 
 ---
 
