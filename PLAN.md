@@ -1,7 +1,9 @@
 # AI Voice Input — macOS 菜单栏语音输入 App 实施计划 (MVP)
 
-> 版本: v1.0 | 日期: 2026-07-18 | 状态: PLAN
+> 版本: v1.1 | 日期: 2026-07-18 | 状态: PLAN
 > 产品一句话: 全局快捷键按下开始录音、再按结束 → OpenAI `gpt-4o-transcribe` 转写 → 文字自动注入当前光标处。无 server、纯本地 App、只用苹果原生框架。
+>
+> **v1.1 修订**(owner 决定 + 本机 6 路 spike 实测,证据全在 `docs/FINDINGS-2026-07-18.md`):本机**无 Xcode**(仅 CLT,SDK 15.5,Swift 6.1.2),构建链整体从 Xcode 工程改为 **SwiftPM + 手工 .app bundle**(§5 重写);§2.5 去掉 data-protection keychain flag(ad-hoc 下 -34018 实测硬失败);§6 分发 gate 在 $99/年 Apple Developer Program 之后(0 codesigning identities,三锁一购);§3 补转写简繁非确定性等实测 refine。菜单栏保持 SwiftUI MenuBarExtra(SwiftPM+CLT 下实测 WORKS,无需 AppKit NSStatusItem 兜底);热键保持 Carbon RegisterEventHotKey(实测零权限收热键;否决 CGEventTap——要 Accessibility,否决 MASShortcut——第三方违反原生框架约束)。
 
 ---
 
@@ -86,7 +88,8 @@
 | `CGEventTap` | 需要辅助功能/输入监控 | 能 | 不可用(沙盒) | 最强但重;系统在 App 卡顿时会禁用 tap,需监听 `kCGEventTapDisabled*` 重挂 |
 
 **决策**:MVP 用 `RegisterEventHotKey`(默认热键建议 `⌥ + Space` 或 `⌃⌥ + V`,避开 Spotlight 的 `⌘Space`)。toggle 模式:按一下开始、再按结束——比 push-to-talk(按住说话)实现简单且不需要 keyUp 事件。"双击 Fn"这类彩蛋放 backlog(需要 CGEventTap + 输入监控权限,权限链变长)。
-坑:热键注册要在主线程;`InstallEventHandler` 的 target 用 `GetEventDispatcherTarget()`;换热键 = 先 `UnregisterEventHotKey` 再注册;与系统/其他 App 冲突时 `RegisterEventHotKey` 返回错误码要提示用户换键。
+坑:热键注册要在主线程;`InstallEventHandler` 的 target 用 `GetApplicationEventTarget()`(spike 实测 err=0;v1.0 写的 `GetEventDispatcherTarget()` 未实测,不用);换热键 = 先 `UnregisterEventHotKey` 再注册;与系统/其他 App 冲突时 `RegisterEventHotKey` 返回错误码要提示用户换键。
+**实测补充(spike 2,adversarial verify 复现通过)**:①「无需任何权限」CONFIRMED——`AXIsProcessTrusted()=false` 全程 4/4 收到 `⌃⌥V`,零 TCC 弹窗;②修饰键换算实测 `[.control,.option]` NSEvent raw 786432 → carbon 6144 = 0x1800,必须按位翻译不能 raw cast;③ **Swift 6 language mode 坑**:`@convention(c)` 的 `EventHandlerUPP` 回调不能捕获上下文,顶层/共享可变状态被 nonisolated 回调触碰时必须 `nonisolated(unsafe)`(或走 `userData` 传 `Unmanaged` 指针 + `MainActor.assumeIsolated`);④必须是真 .app bundle + 活的 NSApplication runloop(`LSUIElement=true` + activationPolicy `.accessory`),裸 SwiftPM 二进制收不到热键。
 
 ### 2.2 文字注入:三方案对比(核心难点)
 
@@ -105,6 +108,7 @@
 - 为什么不用 WAV:16k/16bit mono WAV ≈ 1.9 MB/分钟,上传慢 8 倍,无精度收益。为什么不用 AVAudioEngine:MVP 不需要实时 buffer;仅为菜单栏电平动画用 `recorder.updateMeters()` 即可。
 - **上传**:一次性 multipart/form-data POST(`URLSession.upload`),字段 `file`(audio.m4a)、`model`、`prompt`、`language`、`response_format=json`。**不做流式**:`stream=true` 只是转写结果 SSE 增量返回(音频仍要传完),对"注入一整段文字"的产品形态无收益;真·边说边转要用 Realtime API(websocket),复杂度×3,放 post-MVP。
 - 坑:临时文件放 `FileManager.temporaryDirectory`,转写成功后删除(隐私);录音前必须检查输入设备存在(AirPods 切换瞬间可能无输入);`AVAudioApplication.requestRecordPermission`(macOS 14+)拿麦克风授权。
+- **实测补充(spike 4,WORKS)**:①16k/mono/32kbps AAC 实录 `bit rate 32080 bps`,**0.247 MB/min 证实**,但 m4a 有 **~24.6 KB 固定头**(<10s 短 clip 被头部主导:5s 文件 45KB);②`updateMeters()`+`averagePower(forChannel:)` CLI 下实测出活值(idle −48 → 说话 −16.7 dBFS),电平动画数据源无风险;③`AVAudioApplication.requestRecordPermission` SDK 15.5 编译+回调正常;**非 GUI 进程在 undetermined 态请求会返回 false 但不置 denied、也不弹窗**——要用 `recordPermission` 属性区分「不能弹」vs「真拒绝」;④**TCC 按 responsible-process/bundle-id 分账**:Terminal 直跑继承 Terminal 的 mic 授权,`open` 启动的 .app 是独立 TCC client,首跑会弹自己的 mic 对话框(M1 验收即 owner 点一次 Allow)。
 
 ### 2.4 权限链(首启 Onboarding 关键 UX)
 
@@ -116,25 +120,25 @@
 ### 2.5 Keychain 存取要点
 
 ```swift
-// 存(存在则先 SecItemUpdate,失败再 SecItemAdd)
+// 存(幂等 upsert:先 SecItemDelete 再 SecItemAdd;spike 6 实测全链 OSStatus=0)
 var query: [String: Any] = [
     kSecClass as String:            kSecClassGenericPassword,
     kSecAttrService as String:      "com.yujunzou.ai-voice-input",
     kSecAttrAccount as String:      "openai_api_key",
-    kSecUseDataProtectionKeychain as String: true,   // macOS 上强烈建议,走 iOS 式数据保护钥匙串
+    // 不要设 kSecUseDataProtectionKeychain —— ad-hoc 签名下实测 SecItemAdd
+    // 直接 -34018 (missing entitlement) 硬失败;加 keychain-access-groups
+    // entitlement“修”它 → AMFI 直接 SIGKILL。买 Developer Program 后再评估加回。
 ]
 let attrs: [String: Any] = [
     kSecValueData as String:        key.data(using: .utf8)!,
     kSecAttrAccessible as String:   kSecAttrAccessibleAfterFirstUnlock,
 ]
-let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
-if status == errSecItemNotFound {
-    SecItemAdd(query.merging(attrs) { $1 } as CFDictionary, nil)
-}
+SecItemDelete(query as CFDictionary)
+SecItemAdd(query.merging(attrs) { $1 } as CFDictionary, nil)
 // 读: kSecReturnData=true + kSecMatchLimitOne → SecItemCopyMatching
 ```
 
-要点:绝不进 UserDefaults/plist;`kSecUseDataProtectionKeychain=true` 避免落入旧式 login keychain 弹"允许访问"对话框;错误码要落日志(`errSecMissingEntitlement` 常见于签名/entitlement 配错);UI 里 API Key 用 `SecureField`,只显示尾 4 位;删除 Key 走 `SecItemDelete`。注意:非沙盒 App 用 data-protection keychain 需要 App 有稳定签名(adhoc 重签会读不到旧值,开发期属正常现象)。
+要点:绝不进 UserDefaults/plist;**用 legacy 文件钥匙串**(spike 6 实测 ad-hoc 签名下 ADD/READ/UPDATE/DELETE 全 OSStatus=0、CJK 字节级还原、零 GUI 弹窗);错误码要落日志;UI 里 API Key 用 `SecureField`,只显示尾 4 位;删除 Key 走 `SecItemDelete`。**data-protection keychain(`kSecUseDataProtectionKeychain=true`)在 ad-hoc 签名下不可用**(实测 -34018,不是"读不到旧值"而是写入即失败)——它和稳定 TCC 授权、公证分发一起 gate 在 Developer ID 签名(§6)之后。
 
 ---
 
@@ -154,13 +158,21 @@ if status == errSecItemNotFound {
 来源(2026-07-18 检索):[OpenAI Create transcription API Reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[OpenAI Speech-to-text guide](https://developers.openai.com/api/docs/guides/speech-to-text)、[gpt-4o-transcribe model page](https://developers.openai.com/api/docs/models/gpt-4o-transcribe)、[costgoat OpenAI transcription pricing (Jul 2026)](https://costgoat.com/pricing/openai-transcription)。
 **计划影响**:response_format 用 `json`;标点/去口头禅优先走 `prompt`(零额外成本);价格低到不需要本地降级方案。
 
+**真 key 实测 refine(spike 5,2026-07-18,证据 docs/FINDINGS-2026-07-18.md §2)**:
+- **简繁非确定性(correctness bug,M5 强制项)**:同字节同参 5 次调用,2 次返回**繁体**中文、3 次简体。prompt 加 `使用简体中文输出` 后 4/4 简体 → 该 clause 进默认 prompt,不是可选打磨。首 token 仍不稳定(那个/你/快…),**禁止**在转写首 token 上做精确串匹配/命令触发类设计。
+- `verbose_json`/`srt` 实测 `400 unsupported_value` CONFIRMED;json 响应带 PLAN v1.0 未提的 **`usage` 对象**(audio/text token 细分)→ 可做实时成本显示;prompt 计入 input text_tokens 计费,**steering prompt 要短**。
+- `language=en` 并不能把混输强制成英文;混输**留空最稳**(实测 zh/unset 结果一致)。
+- **25MB 超限不是干净的 HTTP 413**:服务器 mid-upload 掐 TLS(`curl (55)`,http_code 000,空 body)→ 客户端**必须本地预检文件大小**,不能只靠 HTTP status 分支。
+- 激进去口头禅 prompt 会误删真实内容(实测把「记得先跑一下test」删成「就是先跑一下test」)→ 清洗 prompt 保守,提供关闭开关。
+- 延迟:5.2s clip 稳态 0.6–1.0s,首次冷启 ~1.5s;`gpt-4o-mini-transcribe` 同样 200 可用,是活的降级/省钱杠杆。
+
 ---
 
 ## 4. 里程碑分解
 
 | 里程碑 | 内容 | 验收标准 | 预估 |
 |---|---|---|---|
-| **M0 骨架** | Xcode 工程(§5)、MenuBarExtra 图标+菜单(开始/停止占位、设置、退出)、LSUIElement、AppCoordinator 状态机空转、HotkeyManager 注册默认热键打日志 | App 启动只出现在菜单栏;热键按下控制台打点;⌘Q 干净退出 | 1 天 |
+| **M0 骨架** | SwiftPM 工程 + `bundle.sh`(§5)、MenuBarExtra 图标+菜单(开始/停止占位、设置占位、退出)、LSUIElement、AppCoordinator 状态机空转、HotkeyManager 注册默认热键 → 菜单内显示触发计数 | `./bundle.sh` 出 .app;owner `open dist/AIVoiceInput.app`:菜单栏出 mic 图标、Dock/⌘Tab 无条目、全程零权限弹窗;任意 App 里按 `⌃⌥V` 图标 mic↔mic.fill 切换且菜单内计数递增;Quit 干净退出 | 1 天 |
 | **M1 录音** | PermissionManager 麦克风授权流;AudioRecorder 完整实现(m4a/16k/mono);热键 toggle 真录音;菜单栏图标 idle→recording 红点+电平动画;5 分钟硬上限 | 热键说 10 秒中文得到可回放的 .m4a(QuickTime 验证);二次授权拒绝时给出引导;无输入设备不 crash | 1.5 天 |
 | **M2 转写** | TranscriptionClient(multipart + async/await);错误分类与 UI 提示(401 无效 Key/429 限流/断网/超时 30s);先用临时明文 Key 环境变量 | 对着热键说一句中英混合(“帮我 review 一下这个 PR”)→ 菜单栏通知里出现正确转写文本;拔网线得到人话错误提示 | 1.5 天 |
 | **M3 注入** | 辅助功能授权引导+轮询;TextInjector 粘贴法(剪贴板快照/恢复 + ConcealedType)+ CGEvent 打字法 fallback;前台 App 变更保护;secure field 检测拒注 | 在 备忘录 / Safari 输入框 / VS Code / Terminal / 微信 5 个 App 中,热键→说话→文字出现在光标处且原剪贴板内容不丢;密码框场景弹提示不注入 | 2 天 |
@@ -171,7 +183,9 @@ if status == errSecItemNotFound {
 
 ---
 
-## 5. 项目文件结构 + Xcode 工程创建
+## 5. 项目文件结构 + SwiftPM 工程(v1.1 重写;本机无 Xcode,整条链 CLT 实测跑通)
+
+> 决策依据(owner 2026-07-18 拍板 + spike 1/2 实测):`swift build` + 手工 .app bundle + ad-hoc `codesign` 在 CLT-only 机器上完整可用,MenuBarExtra、Carbon 热键、strict-concurrency=complete 全部零 error 编译并运行验证。**只有当后期签名/公证真的卡住,才回头申请装 Xcode(报 manager)。**
 
 ### 5.1 目录树
 
@@ -179,52 +193,50 @@ if status == errSecItemNotFound {
 ai-voice-input/
 ├── PLAN.md                          # 本文件
 ├── README.md                        # M5 补
-├── AIVoiceInput.xcodeproj
-├── AIVoiceInput/
-│   ├── AIVoiceInputApp.swift        # @main, MenuBarExtra + Settings scene
+├── docs/
+│   └── FINDINGS-2026-07-18.md       # 6 路 spike 实测证据(本 plan 的修订依据)
+├── Package.swift                    # SwiftPM 工程;无 .xcodeproj
+├── bundle.sh                        # swift build → 组 .app → ad-hoc codesign → verify
+├── Sources/AIVoiceInput/
+│   ├── App.swift                    # @main, MenuBarExtra(勿命名 main.swift,见 §5.2-4)
 │   ├── AppCoordinator.swift         # 状态机/编排
 │   ├── Modules/
 │   │   ├── HotkeyManager.swift
-│   │   ├── AudioRecorder.swift
-│   │   ├── TranscriptionClient.swift
-│   │   ├── TextInjector.swift
-│   │   ├── SettingsStore.swift
-│   │   ├── KeychainHelper.swift
-│   │   └── PermissionManager.swift
+│   │   ├── AudioRecorder.swift      # M1
+│   │   ├── TranscriptionClient.swift# M2
+│   │   ├── TextInjector.swift       # M3
+│   │   ├── SettingsStore.swift      # M4
+│   │   ├── KeychainHelper.swift     # M4
+│   │   └── PermissionManager.swift  # M1/M3
 │   ├── UI/
 │   │   ├── MenuBarView.swift        # 下拉菜单内容
-│   │   ├── StatusIcon.swift         # 状态图标(SF Symbols: mic / mic.fill / waveform)
-│   │   ├── SettingsView.swift       # TabView: General/Hotkey/Advanced
-│   │   ├── HotkeyRecorderView.swift # 快捷键录制控件(NSViewRepresentable 捕获 keyDown)
-│   │   └── OnboardingView.swift
-│   ├── Support/
-│   │   ├── TextPostProcessor.swift  # M5: 口头禅正则
-│   │   └── Log.swift                # os.Logger 封装
-│   ├── Assets.xcassets
-│   ├── Info.plist
-│   └── AIVoiceInput.entitlements
-└── AIVoiceInputTests/
+│   │   ├── SettingsView.swift       # M4: TabView General/Hotkey/Advanced
+│   │   ├── HotkeyRecorderView.swift # M4
+│   │   └── OnboardingView.swift     # M4
+│   └── Support/
+│       ├── TextPostProcessor.swift  # M5: 口头禅正则
+│       └── Log.swift                # os.Logger 封装
+└── Tests/AIVoiceInputTests/         # swift test 直接跑(无需 Xcode test target)
     ├── TranscriptionClientTests.swift   # URLProtocol mock
     ├── KeychainHelperTests.swift
     └── TextPostProcessorTests.swift
 ```
 
-### 5.2 Xcode 工程创建步骤
+### 5.2 工程要点(全部实测,来源 FINDINGS §3)
 
-1. Xcode → New Project → **macOS App**,Interface: SwiftUI,Language: Swift。Product Name `AIVoiceInput`,**Bundle ID `com.yujunzou.ai-voice-input`**,Team 选个人 Developer ID 账号。Deployment target **macOS 14.0**(要 `@Observable` + `AVAudioApplication`;`MenuBarExtra` 只需 13+)。
-2. **Signing & Capabilities**:删除默认的 **App Sandbox capability**(§2.4 原因);保留/开启 **Hardened Runtime**;在 Hardened Runtime 下勾 **Audio Input**(生成 `com.apple.security.device.audio-input`)。
-3. **entitlements 最终内容**:仅 `com.apple.security.device.audio-input = true`(注意:文件里**不得出现** `com.apple.security.app-sandbox`)。
-4. **Info.plist 键**:
-   - `NSMicrophoneUsageDescription` = "需要麦克风录制您的语音以进行转写。"
-   - `LSUIElement` (Application is agent) = `YES` → 无 Dock 图标、无主窗口
-   - `LSMinimumSystemVersion` = 14.0(模板自带)
-5. Build Settings:`SWIFT_STRICT_CONCURRENCY = complete`(新工程默认 Swift 6 即可);链接框架:AVFoundation、Carbon(仅 HotKey 头)、ApplicationServices(AX/CGEvent)、Security——全部系统自带,零第三方依赖。
-6. 建 `AIVoiceInputTests` unit test target;Scheme 勾 Test。
-7. `git init` + `.gitignore`(xcuserdata/、DerivedData/、*.xcuserstate)。
+1. **Package.swift**:swift-tools-version 6.1,`platforms: [.macOS(.v14)]`(实测:`.v13` 是 MenuBarExtra 下限,`.v15` 是本 SDK 符号上限,`.v26` 直接编译失败——**任何 macOS 26/SDK 16-only API 不可达**);单 `executableTarget`,Carbon/AVFoundation/ApplicationServices/Security 都是系统框架 `import` 即用,零第三方依赖。
+2. **入口文件必须叫 `App.swift` 不叫 `main.swift`**:`@main` + `main.swift` 触发 `'main' attribute cannot be used in a module that contains top-level code`(Swift 6.1 侥幸能过但 version-dependent,不赌)。
+3. **bundle.sh**(≈40 行,spike 已验证逐字可跑):`swift build -c release` → `dist/AIVoiceInput.app/Contents/{MacOS,Resources}` → 写 Info.plist(`CFBundleIdentifier=com.yujunzou.ai-voice-input`、`LSUIElement=true`、`NSMicrophoneUsageDescription`、`LSMinimumSystemVersion=14.0`)+ `PkgInfo` → `codesign --force --sign - --identifier <bundle-id> --timestamp=none`(**不用 `--deep`,已被 Apple 弃用**且单可执行 bundle 不需要)→ `codesign --verify`。
+4. **Swift 6 strict concurrency 不是风险**:`-strict-concurrency=complete` 全量零 error/warning 实测通过,不需要迁移预算;唯一坑是 Carbon C 回调的 `nonisolated(unsafe)`(§2.1)。
+5. **entitlements**:ad-hoc 阶段不带任何 entitlement 文件(restricted entitlement + ad-hoc = AMFI SIGKILL,spike 6 实测);`com.apple.security.device.audio-input` 是 Hardened-Runtime 签名(§6,Developer ID 后)才需要的,本地 dev 阶段 TCC 只看 Info.plist 的 usage description。
+6. 测试:`swift test`(SwiftPM 原生 test target)。
+7. **dev-loop TCC 事实(FINDINGS §2.4/§4)**:ad-hoc .app 的 Accessibility 授权按 cdhash 记账,**每次重建失效**;但**从已授权的 Terminal 直接跑二进制**会继承 Terminal 的授权且跨重签/改路径保留 → M3 起开发迭代用「Terminal 直跑」,只在验收时用 `open dist/*.app`。
 
 ---
 
-## 6. 分发:Developer ID 签名 + 公证
+## 6. 分发:Developer ID 签名 + 公证(**gate:$99/年 Apple Developer Program,owner 钱决策**)
+
+**现状实测(spike 6)**:`security find-identity -v -p codesigning` → **`0 valid identities found`**;`notarytool`/`stapler`/`codesign` 工具全在位但凭据全缺 → **本节今天不可执行,是「工具就绪、账号阻塞」**。三个 blocker 塌缩成同一次购买:①data-protection keychain(§2.5)②跨重建稳定的 TCC/Accessibility 授权(ad-hoc DR=cdhash,whitespace-only 重建即失效,实测)③分发到别的 Mac。**建议**:M0–M5 全程 ad-hoc 本机开发(零阻塞),等「装第二台 Mac/给别人用/重授权忍无可忍」任一为真再买;延后无返工(买后只影响签名参数和 §2.5 一行 flag)。若公证流程真卡住 → 报 manager,再考虑装 Xcode。
 
 **为什么不能上 Mac App Store**:MAS 强制 App Sandbox;本产品核心功能(辅助功能注入文字、向其他 App post CGEvent)在沙盒内被系统禁止且 `AXIsProcessTrusted` 永远为 false。市面同类(Raycast、Rectangle、MacWhisper 注入版)同样都是 Developer ID 站外分发。
 
@@ -261,6 +273,7 @@ ai-voice-input/
 
 ## 8. 开工顺序(下一步)
 
-1. 按 §5.2 建工程,提交 M0 骨架
-2. M1–M5 每个里程碑一个 feature branch,验收标准过了才合 main
-3. M2 起真实调用 OpenAI,`OPENAI_API_KEY` 从环境变量读(开发期),M4 切 Keychain
+1. 按 §5(SwiftPM)建工程,提交 M0 骨架;owner 按 M0 验收标准肉眼确认一次(agent 在 Background session 看不到菜单栏)
+2. M1–M5 每个里程碑验收标准过了才进下一个;单人 repo,直接 main 上小步 commit(feature branch 仅在需要并行试验时用)
+3. M2 起真实调用 OpenAI,`OPENAI_API_KEY` 从环境变量读(开发期),M4 切 Keychain(legacy 文件钥匙串,§2.5)
+4. grill 修订(GRILL.md)落地后合入本 plan → v1.2
