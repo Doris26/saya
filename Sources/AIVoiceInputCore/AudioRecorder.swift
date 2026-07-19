@@ -3,12 +3,12 @@ import AVFoundation
 /// AVAudioRecorder 封装:16kHz 单声道 AAC 32kbps 临时文件(实测 0.247 MB/min,FINDINGS §6)。
 /// 5 分钟硬上限防口袋误触烧钱(PLAN §2.3),经 record(forDuration:) + delegate 回调。
 @MainActor
-final class AudioRecorder: NSObject {
-    enum RecorderError: LocalizedError {
+public final class AudioRecorder: NSObject {
+    public enum RecorderError: LocalizedError {
         case noInputDevice
         case startFailed
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .noInputDevice: "没有可用的音频输入设备"
             case .startFailed: "录音启动失败"
@@ -16,18 +16,18 @@ final class AudioRecorder: NSObject {
         }
     }
 
-    static let maxDuration: TimeInterval = 300
+    public static let maxDuration: TimeInterval = 300
 
     private var recorder: AVAudioRecorder?
-    private(set) var currentFileURL: URL?
+    public private(set) var currentFileURL: URL?
 
     /// 5 分钟硬上限自动停止时回调(手动 stop 不触发)
-    var onAutoStop: (@MainActor (URL) -> Void)?
+    public var onAutoStop: (@MainActor (URL) -> Void)?
 
-    var isRecording: Bool { recorder?.isRecording ?? false }
-    var currentTime: TimeInterval { recorder?.currentTime ?? 0 }
+    public var isRecording: Bool { recorder?.isRecording ?? false }
+    public var currentTime: TimeInterval { recorder?.currentTime ?? 0 }
 
-    func start() throws {
+    public func start() throws {
         // 录音前检查输入设备存在(AirPods 切换瞬间可能无输入,PLAN §2.3)
         guard AVCaptureDevice.default(for: .audio) != nil else {
             throw RecorderError.noInputDevice
@@ -56,7 +56,7 @@ final class AudioRecorder: NSObject {
     }
 
     /// 手动停止;返回录音文件 URL
-    func stop() -> URL? {
+    public func stop() -> URL? {
         guard let activeRecorder = recorder, let url = currentFileURL else { return nil }
         recorder = nil // 先清引用:delegate 回调据此区分手动停 vs 5min 自动停
         activeRecorder.stop()
@@ -65,7 +65,7 @@ final class AudioRecorder: NSObject {
     }
 
     /// 当前电平 dBFS(录音中才有值;实测 idle ≈ −48,说话 ≈ −17,FINDINGS §6)
-    func averagePowerDB() -> Float? {
+    public func averagePowerDB() -> Float? {
         guard let activeRecorder = recorder, activeRecorder.isRecording else { return nil }
         activeRecorder.updateMeters()
         return activeRecorder.averagePower(forChannel: 0)
@@ -73,7 +73,7 @@ final class AudioRecorder: NSObject {
 }
 
 extension AudioRecorder: AVAudioRecorderDelegate {
-    nonisolated func audioRecorderDidFinishRecording(_ finishedRecorder: AVAudioRecorder, successfully flag: Bool) {
+    public nonisolated func audioRecorderDidFinishRecording(_ finishedRecorder: AVAudioRecorder, successfully flag: Bool) {
         Task { @MainActor in
             // 手动 stop() 已把 self.recorder 置 nil → 这里只处理 5min 硬上限自动停
             guard self.recorder === finishedRecorder, let url = self.currentFileURL else { return }

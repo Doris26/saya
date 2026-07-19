@@ -1,24 +1,27 @@
+import AIVoiceInputCore
 import AppKit
 import Observation
 
-/// App 全局状态。所有模块只被 AppCoordinator 编排,互相不引用(PLAN §1.2)。
+/// App 全局状态(与 PLAN §1.1 图对齐,grill #8:injecting 补入,M3 启用)。
 enum AppState: Equatable {
     case idle
     case recording
     case transcribing
+    case injecting
     case error(String)
 
     var menuBarSymbol: String {
         switch self {
         case .idle: "mic"
         case .recording: "mic.fill"
-        case .transcribing: "waveform"
+        case .transcribing, .injecting: "waveform"
         case .error: "mic.slash"
         }
     }
 }
 
-/// 唯一状态机与编排者。M1:热键 toggle 真录音;M2 起接转写。
+/// 唯一状态机与编排者。M2:录音→转写→菜单可找回;注入是 M3。
+/// 热键转移表(PLAN §1.2):idle/error→开录;recording→停录进管线;transcribing/injecting→忽略+日志。
 @MainActor
 @Observable
 final class AppCoordinator {
@@ -26,14 +29,29 @@ final class AppCoordinator {
     private(set) var hotkeyFireCount = 0
     private(set) var levelDB: Float?
     private(set) var recordingSeconds = 0
-    private(set) var lastRecordingURL: URL?
+    /// 【P0#1】注入成功不可探测 → 内存保留最近一次转写,菜单可复制(唯一找回路径)
+    private(set) var lastTranscript: String?
+    private(set) var lastNote: String?
+    private(set) var failedRecordingURL: URL?
     let hotkey: Hotkey = .defaultToggle
 
     @ObservationIgnored private let hotkeyManager = HotkeyManager()
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored private let permissions = PermissionManager()
+    @ObservationIgnored private let transcriber = TranscriptionClient()
     /// 防重入:mic 授权 dialog await 期间再按热键不得再起一个 startRecording(实测竞态)
     @ObservationIgnored private var isStartingRecording = false
+    @ObservationIgnored private var transcribeTask: Task<Void, Never>?
+    /// 录音全程最大电平(静音 gate 数据源,grill #5)
+    @ObservationIgnored private var maxLevelDB: Float = -160
+    @ObservationIgnored private var recordingDuration: TimeInterval = 0
+    /// 【P0#1】音频延迟到下次录音开始才删(始终留一次重试机会)
+    @ObservationIgnored private var pendingDeletionURL: URL?
+
+    /// grill #5:三层静音/误触 gate 的阈值。本底实测 −48 dBFS、正常语音 −17(FINDINGS §6);
+    /// 阈值保守取 −42——宁可放过静音也不吞真口述(误杀=P0#1 级伤害)
+    static let minDuration: TimeInterval = 0.7
+    static let speechLevelFloorDB: Float = -42
 
     var statusLine: String {
         switch state {
@@ -44,6 +62,8 @@ final class AppCoordinator {
             return "录音中… \(recordingSeconds / 60):\(String(format: "%02d", recordingSeconds % 60))\(level)"
         case .transcribing:
             return "转写中…"
+        case .injecting:
+            return "输入中…"
         case .error(let message):
             return "错误:\(message)"
         }
@@ -52,9 +72,13 @@ final class AppCoordinator {
     init() {
         registerHotkey()
         recorder.onAutoStop = { [weak self] url in
-            self?.finishRecording(with: url, reason: "5min cap")
+            // grill #5:5min cap 的自动停止走完整转写但永不自动注入(M3 起也一样)
+            self?.handleRecordingFinished(url: url, autoStopped: true)
         }
+        sweepStaleAudio()
     }
+
+    // MARK: - 热键转移表
 
     func toggleRecording() {
         switch state {
@@ -69,20 +93,53 @@ final class AppCoordinator {
                 isStartingRecording = false
             }
         case .recording:
+            recordingDuration = recorder.currentTime
             if let url = recorder.stop() {
-                finishRecording(with: url, reason: "manual stop")
+                handleRecordingFinished(url: url, autoStopped: false)
             } else {
                 state = .idle
             }
-        case .transcribing:
-            // 转写期间 toggle 无操作;M2 起决定是否允许排队/取消
-            Log.app.info("toggle ignored while transcribing")
+        case .transcribing, .injecting:
+            Log.app.info("toggle ignored in state \(String(describing: self.state), privacy: .public)")
         }
     }
 
+    /// grill #7:取消——recording 态丢音频,transcribing 态丢结果;零 API 零注入
+    func cancel() {
+        switch state {
+        case .recording:
+            recordingDuration = 0
+            if let url = recorder.stop() {
+                try? FileManager.default.removeItem(at: url)
+            }
+            leaveRecordingState()
+            state = .idle
+            lastNote = "已取消录音(音频已丢弃)"
+            playSound("Basso")
+            Log.app.info("recording cancelled")
+        case .transcribing:
+            transcribeTask?.cancel()
+        default:
+            break
+        }
+    }
+
+    func retryTranscription() {
+        guard state != .recording, state != .transcribing, let url = failedRecordingURL else { return }
+        transcribe(url: url, autoStopped: false)
+    }
+
+    func copyLastTranscript() {
+        guard let text = lastTranscript else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        lastNote = "已复制到剪贴板"
+    }
+
     func revealLastRecording() {
-        guard let url = lastRecordingURL else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        let url = failedRecordingURL ?? pendingDeletionURL
+        if let url { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     // MARK: - Recording
@@ -95,7 +152,6 @@ final class AppCoordinator {
             return
         case .undetermined:
             guard await permissions.requestMicAccess() else {
-                // 弹窗被拒(或非 GUI 环境弹不出,FINDINGS §6)
                 state = .error("未获得麦克风权限")
                 return
             }
@@ -103,9 +159,25 @@ final class AppCoordinator {
             break
         }
 
+        // 【P0#1】上一条音频到此刻(新录音开始)才删
+        if let url = pendingDeletionURL {
+            try? FileManager.default.removeItem(at: url)
+            pendingDeletionURL = nil
+        }
+        if let url = failedRecordingURL {
+            // 单槽策略(grill #26):新录音覆盖失败槽
+            try? FileManager.default.removeItem(at: url)
+            failedRecordingURL = nil
+        }
+
         do {
             try recorder.start()
+            maxLevelDB = -160
+            lastNote = nil
             state = .recording
+            playSound("Pop") // grill #9:开始提示音(全屏/notch 下唯一反馈)
+            // grill #7:仅录音期间临时注册 Esc 取消(tradeoff:此间系统级占用 Esc)
+            try? hotkeyManager.registerCancelKey { [weak self] in self?.cancel() }
             startMeterLoop()
         } catch {
             state = .error(error.localizedDescription)
@@ -113,24 +185,129 @@ final class AppCoordinator {
         }
     }
 
-    private func finishRecording(with url: URL, reason: String) {
+    private func leaveRecordingState() {
+        hotkeyManager.unregisterCancelKey()
         levelDB = nil
         recordingSeconds = 0
-        lastRecordingURL = url
-        // M1: 停在 idle,文件留验收;M2 起 -> .transcribing -> TranscriptionClient
-        state = .idle
-        Log.app.info("recorded (\(reason, privacy: .public)) -> \(url.path, privacy: .public)")
     }
 
-    /// 录音期间 5Hz 刷电平 + 秒数(数据源实测可用,FINDINGS §6)
+    private func handleRecordingFinished(url: URL, autoStopped: Bool) {
+        if autoStopped { recordingDuration = AudioRecorder.maxDuration }
+        leaveRecordingState()
+        playSound("Glass") // grill #9:结束提示音
+
+        // grill #5 gate 1:<0.7s 丢弃不调 API(误触)
+        guard recordingDuration >= Self.minDuration else {
+            try? FileManager.default.removeItem(at: url)
+            state = .idle
+            lastNote = "录音过短(<0.7s)已丢弃"
+            Log.app.info("discarded: too short (\(self.recordingDuration, privacy: .public)s)")
+            return
+        }
+        // grill #5 gate 2:电平全程未过噪声底 → 跳过 API(静音幻觉防线;文件保留可手动重试)
+        guard maxLevelDB >= Self.speechLevelFloorDB else {
+            failedRecordingURL = url
+            state = .idle
+            lastNote = String(format: "未检测到语音(峰值 %.0f dB)已跳过转写,可从菜单重试", maxLevelDB)
+            Log.app.info("skipped API: max level \(self.maxLevelDB, privacy: .public) below floor")
+            return
+        }
+        if autoStopped { lastNote = "已达 5 分钟上限自动停止" }
+        transcribe(url: url, autoStopped: autoStopped)
+    }
+
+    /// 录音期间 5Hz 刷电平/秒数/最大电平(menu-tracking-safe:Task 非 default-mode Timer,grill #17)
     private func startMeterLoop() {
         Task { [weak self] in
             while let self, self.state == .recording {
-                self.levelDB = self.recorder.averagePowerDB()
+                if let level = self.recorder.averagePowerDB() {
+                    self.levelDB = level
+                    self.maxLevelDB = max(self.maxLevelDB, level)
+                }
                 self.recordingSeconds = Int(self.recorder.currentTime)
+                self.recordingDuration = self.recorder.currentTime
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
+    }
+
+    // MARK: - Transcription (M2)
+
+    private func transcribe(url: URL, autoStopped: Bool) {
+        // 开发期从 sourced 环境读;M4 切 Keychain 且 release 忽略 env(grill #29)
+        let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        state = .transcribing
+        transcribeTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let started = Date()
+                let result = try await self.transcriber.transcribe(fileURL: url, apiKey: apiKey)
+                let elapsed = Date().timeIntervalSince(started)
+                self.lastTranscript = result.text
+                self.failedRecordingURL = nil
+                self.pendingDeletionURL = url // 【P0#1】不立即删,下次录音开始才删
+                self.state = .idle
+                self.lastNote = String(
+                    format: "转写完成(%d 字 · %.1fs%@)",
+                    result.text.count, elapsed,
+                    result.totalTokens.map { " · \($0) tok" } ?? ""
+                )
+                // 隐私(grill #27):transcript 正文不 .public
+                Log.transcribe.info("ok: \(result.text.count, privacy: .public) chars in \(elapsed, privacy: .public)s")
+                // agent 验收通道(dev only):AIVI_DEBUG_DIR 设置时落 transcript 到 0600 文件,
+                // 不经 unified log(unified log 里正文保持 private)
+                if let debugDir = ProcessInfo.processInfo.environment["AIVI_DEBUG_DIR"] {
+                    let debugFile = URL(fileURLWithPath: debugDir).appendingPathComponent("last_transcript.txt")
+                    try? result.text.write(to: debugFile, atomically: true, encoding: .utf8)
+                    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: debugFile.path)
+                }
+            } catch is CancellationError {
+                self.handleTranscribeFailure(url: url, note: "已取消转写(音频保留,可重试)")
+            } catch let error as TranscriptionClient.TranscriptionError {
+                self.handleTranscribeFailure(url: url, note: error.localizedDescription)
+            } catch {
+                let urlError = error as? URLError
+                if urlError?.code == .cancelled {
+                    self.handleTranscribeFailure(url: url, note: "已取消转写(音频保留,可重试)")
+                } else {
+                    self.handleTranscribeFailure(url: url, note: error.localizedDescription)
+                }
+            }
+            self.transcribeTask = nil
+        }
+    }
+
+    private func handleTranscribeFailure(url: URL, note: String) {
+        failedRecordingURL = url // 音频保留,菜单可重试(PLAN §7#3)
+        state = .error(note)
+        lastNote = note
+        playSound("Basso")
+        Log.transcribe.error("failed: \(note, privacy: .public)")
+    }
+
+    // MARK: - Housekeeping
+
+    /// grill #26:启动清扫 >24h 残留音频;目录收紧 0700
+    private func sweepStaleAudio() {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory.appendingPathComponent("ai-voice-input", isDirectory: true)
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true,
+                                         attributes: [.posixPermissions: 0o700])
+        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let cutoff = Date().addingTimeInterval(-24 * 3600)
+        if let files = try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) {
+            for file in files {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                if let modified, modified < cutoff {
+                    try? fileManager.removeItem(at: file)
+                    Log.app.info("swept stale audio \(file.lastPathComponent, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    private func playSound(_ name: String) {
+        NSSound(named: NSSound.Name(name))?.play()
     }
 
     // MARK: - Hotkey
@@ -145,7 +322,7 @@ final class AppCoordinator {
             }
             Log.hotkey.info("registered \(self.hotkey.displayString, privacy: .public)")
         } catch {
-            // 与其他 App 冲突时 RegisterEventHotKey 返回错误码,提示用户换键(PLAN §2.1)
+            // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10);默认 ⌃⌥V 不会踩,自定义键 M4 处理
             state = .error("热键注册失败(\(hotkey.displayString) 可能被其他 App 占用)")
             Log.hotkey.error("register failed: \(String(describing: error), privacy: .public)")
         }

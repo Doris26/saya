@@ -1,3 +1,4 @@
+import AIVoiceInputCore
 import SwiftUI
 
 // 入口文件不叫 main.swift:`@main` + main.swift 会触发
