@@ -18,6 +18,16 @@ enum AppState: Equatable {
         case .error: "mic.slash"
         }
     }
+
+    /// 彩色 emoji 字形 — 菜单栏里比单色 SF Symbol 显眼得多,便于在众多系统图标 / 刘海旁找到。
+    var menuBarGlyph: String {
+        switch self {
+        case .idle: "🎙️"
+        case .recording: "🔴"
+        case .transcribing, .injecting: "⏳"
+        case .error: "⚠️"
+        }
+    }
 }
 
 /// 唯一状态机与编排者。M2:录音→转写→菜单可找回;注入是 M3。

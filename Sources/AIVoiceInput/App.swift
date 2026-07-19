@@ -11,7 +11,8 @@ struct AIVoiceInputApp: App {
         MenuBarExtra {
             MenuBarView(coordinator: coordinator)
         } label: {
-            Image(systemName: coordinator.state.menuBarSymbol)
+            // 彩色 emoji 字形:在菜单栏(尤其刘海旁 / 一堆单色系统图标中)一眼可辨。
+            Text(coordinator.state.menuBarGlyph)
         }
 
         Settings {
