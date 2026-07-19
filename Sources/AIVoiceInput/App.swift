@@ -11,8 +11,10 @@ struct AIVoiceInputApp: App {
         MenuBarExtra {
             MenuBarView(coordinator: coordinator)
         } label: {
-            // 彩色 emoji 字形:在菜单栏(尤其刘海旁 / 一堆单色系统图标中)一眼可辨。
-            Text(coordinator.state.menuBarGlyph)
+            // 单色 template 图标,融入系统菜单栏审美;录音红/出错橙 tint 提示。
+            // waveform(声波)= Saya 品牌形状,比普通 mic 更易在一排图标里辨认。
+            Image(systemName: coordinator.state.menuBarSymbol)
+                .foregroundStyle(menuBarTint(for: coordinator.state))
         }
 
         Settings {
@@ -26,5 +28,14 @@ struct AIVoiceInputApp: App {
             }
         }
         .windowResizability(.contentSize)
+    }
+
+    /// 菜单栏图标着色:仅录音(红)/出错(橙)上色,其余跟随系统前景色(单色不扎眼)。
+    private func menuBarTint(for state: AppState) -> Color {
+        switch state {
+        case .recording: .red
+        case .error: .orange
+        default: .primary
+        }
     }
 }

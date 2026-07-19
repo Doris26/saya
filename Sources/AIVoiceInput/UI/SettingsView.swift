@@ -29,17 +29,24 @@ private struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section("OpenAI API Key") {
+                // 已保存时占位符改成明确提示,避免空 SecureField 的 "sk-…" 占位被误认成残留 key
+                let hasKey = !settings.effectiveAPIKey.isEmpty
                 HStack {
-                    SecureField("sk-…", text: $apiKeyField)
+                    SecureField(hasKey ? "粘贴新 Key 可更换(留空保留当前)" : "sk-…", text: $apiKeyField)
                     Button("保存") {
                         settings.apiKey = apiKeyField
                         apiKeyField = ""
-                        testResult = "已保存(\(settings.apiKeyMasked))"
+                        testResult = "已保存 ✓(\(settings.apiKeyMasked))"
                     }
                     .disabled(apiKeyField.isEmpty)
                 }
                 HStack {
-                    Text("当前:\(settings.apiKeyMasked)").foregroundStyle(.secondary)
+                    if hasKey {
+                        Label("已保存:\(settings.apiKeyMasked)", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("未配置").foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Button(testing ? "测试中…" : "测试连接") {
                         testing = true
@@ -48,7 +55,7 @@ private struct GeneralSettingsTab: View {
                             testing = false
                         }
                     }
-                    .disabled(testing)
+                    .disabled(testing || !hasKey)
                 }
                 if !testResult.isEmpty {
                     Text(testResult).font(.caption).foregroundStyle(.secondary)

@@ -10,22 +10,14 @@ enum AppState: Equatable {
     case injecting
     case error(String)
 
+    /// 菜单栏 template 图标(单色,融入系统审美)。waveform = Saya 品牌声波形状,
+    /// 比普通 mic 在一排图标里更易辨认;状态用不同变体 + tint 区分。
     var menuBarSymbol: String {
         switch self {
-        case .idle: "mic"
-        case .recording: "mic.fill"
-        case .transcribing, .injecting: "waveform"
-        case .error: "mic.slash"
-        }
-    }
-
-    /// 彩色 emoji 字形 — 菜单栏里比单色 SF Symbol 显眼得多,便于在众多系统图标 / 刘海旁找到。
-    var menuBarGlyph: String {
-        switch self {
-        case .idle: "🎙️"
-        case .recording: "🔴"
-        case .transcribing, .injecting: "⏳"
-        case .error: "⚠️"
+        case .idle: "waveform"
+        case .recording: "waveform.badge.microphone"
+        case .transcribing, .injecting: "waveform.badge.magnifyingglass"
+        case .error: "waveform.slash"
         }
     }
 }
