@@ -2,14 +2,17 @@
 # swift build → 组 .app → ad-hoc codesign → verify(spike 1 实测逐字跑通,FINDINGS §3.3)
 set -euo pipefail
 
-APP_NAME="AIVoiceInput"
-BUNDLE_ID="com.yujunzou.ai-voice-input"
+# PRODUCT = 面向用户的产品名(.app / 显示名);TARGET = SwiftPM 可执行 target 名(编译产物,勿改)
+PRODUCT="LingoFlow"
+TARGET="AIVoiceInput"
+BUNDLE_ID="com.yujunzou.lingoflow"
 VERSION="0.1.0"
 CONFIG="release"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN="$ROOT/.build/$CONFIG/$APP_NAME"
-APP="$ROOT/dist/$APP_NAME.app"
+BIN="$ROOT/.build/$CONFIG/$TARGET"
+APP="$ROOT/dist/$PRODUCT.app"
+APP_NAME="$PRODUCT"
 
 swift build -c "$CONFIG" --package-path "$ROOT"
 
@@ -28,7 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>            <string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key>     <string>AI Voice Input</string>
+    <key>CFBundleDisplayName</key>     <string>LingoFlow</string>
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundleIdentifier</key>      <string>$BUNDLE_ID</string>
