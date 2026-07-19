@@ -186,6 +186,8 @@ SecItemAdd(query.merging(attrs) { $1 } as CFDictionary, nil)
 
 ## 4. 里程碑分解
 
+> **进度(2026-07-19)**:M0–M5 **agent 侧全部完成并 commit**(`3282fae` M0 → `59cf90c` M5),每个里程碑 `./bundle.sh` 出签名 .app、`swift test` 29/29 绿、从零全清 `strict-concurrency=complete` 零 error/warning。**待 owner 亲测**(agent 在 Background session 测不了的部分):菜单栏可见性、真实 App 落字、onboarding 授权流、20 句口述人工评分——步骤见 `docs/OWNER-ACCEPTANCE.md`(S1/S2/S3 三次会话)。owner 给 API Key + 做完辅助功能授权后端到端联调。
+
 | 里程碑 | 内容 | 验收标准 | 预估 |
 |---|---|---|---|
 | **M0 骨架** | SwiftPM 工程 + `bundle.sh`(§5)、MenuBarExtra 图标+菜单(开始/停止占位、设置占位、退出)、LSUIElement、AppCoordinator 状态机空转、HotkeyManager 注册默认热键 → 菜单内显示触发计数 | `./bundle.sh` 出 .app + `swift test` green(swift-testing 占位,P0#3);owner `open dist/AIVoiceInput.app`:菜单栏出 mic 图标、Dock/⌘Tab 无条目、全程零权限弹窗;任意 App 里按 `⌃⌥V` 图标 mic↔mic.fill 切换且菜单内计数递增;Quit 干净退出 | 1 天 |
