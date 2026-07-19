@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saya</title>
+<meta name="description" content="Speak, and your words land at the cursor — in English and 中文. A free, open-source voice-input app for macOS.">
+<style>
+  :root{
+    --bg:#070910; --fg:#f0f3f8; --muted:#9aa3b6;
+    --teal:#2DD4BF; --indigo:#6C5CE7;
+    --card:rgba(255,255,255,.05); --card-brd:rgba(255,255,255,.12); --hi:rgba(255,255,255,.18);
+    --glass:rgba(255,255,255,.07); --glass-brd:rgba(255,255,255,.16);
+    --shadow:0 24px 80px rgba(0,0,0,.5); --btn-fg:#070910;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#e8ebf3; --fg:#0d1017; --muted:#5f6a7d;
+      --card:rgba(255,255,255,.45); --card-brd:rgba(255,255,255,.7); --hi:rgba(255,255,255,.9);
+      --glass:rgba(255,255,255,.6); --glass-brd:rgba(255,255,255,.85);
+      --shadow:0 24px 70px rgba(31,38,74,.16); --btn-fg:#fbfbfd; }
+  }
+  :root[data-theme="dark"]{ --bg:#070910; --fg:#f0f3f8; --muted:#9aa3b6; --card:rgba(255,255,255,.05); --card-brd:rgba(255,255,255,.12); --hi:rgba(255,255,255,.18); --glass:rgba(255,255,255,.07); --glass-brd:rgba(255,255,255,.16); --shadow:0 24px 80px rgba(0,0,0,.5); --btn-fg:#070910; }
+  :root[data-theme="light"]{ --bg:#e8ebf3; --fg:#0d1017; --muted:#5f6a7d; --card:rgba(255,255,255,.45); --card-brd:rgba(255,255,255,.7); --hi:rgba(255,255,255,.9); --glass:rgba(255,255,255,.6); --glass-brd:rgba(255,255,255,.85); --shadow:0 24px 70px rgba(31,38,74,.16); --btn-fg:#fbfbfd; }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:ui-rounded,"SF Pro Rounded","Hiragino Maru Gothic ProN",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100dvh; display:flex; align-items:center; justify-content:center;
+    padding:2rem; position:relative; overflow:hidden;
+  }
+  .blob{ position:fixed; border-radius:50%; filter:blur(100px); opacity:.7; z-index:0; pointer-events:none; }
+  .b1{ width:48vw; height:48vw; background:var(--teal);   top:-10vw; left:-8vw;  animation:d1 18s ease-in-out infinite; }
+  .b2{ width:44vw; height:44vw; background:var(--indigo); bottom:-12vw; right:-8vw; animation:d2 22s ease-in-out infinite; }
+  .b3{ width:30vw; height:30vw; background:var(--indigo); top:30%; left:44%; opacity:.4; animation:d1 26s ease-in-out infinite reverse; }
+  @keyframes d1{ 0%,100%{transform:translate(0,0)} 50%{transform:translate(6vw,4vw)} }
+  @keyframes d2{ 0%,100%{transform:translate(0,0)} 50%{transform:translate(-5vw,-4vw)} }
+  @media (prefers-reduced-motion:reduce){ .blob{animation:none} }
+
+  /* 主玻璃卡片:强化磨砂质感 */
+  .card{
+    position:relative; z-index:1; width:min(680px,94vw);
+    display:flex; flex-direction:column; align-items:center; gap:1.9rem;
+    padding:clamp(2rem,5vw,3.2rem);
+    border-radius:32px;
+    background:var(--card);
+    border:1px solid var(--card-brd);
+    box-shadow:var(--shadow), inset 0 1px 0 var(--hi);
+    backdrop-filter:blur(40px) saturate(1.6);
+    -webkit-backdrop-filter:blur(40px) saturate(1.6);
+    text-align:center;
+  }
+
+  .word{ font-size:clamp(2rem,6vw,3rem); font-weight:700; letter-spacing:-.01em; margin:0; line-height:1;
+    background:linear-gradient(100deg,var(--teal),var(--indigo));
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+
+  .stage{ position:relative; cursor:pointer; }
+  canvas{ display:block; width:min(540px,80vw); height:170px; }
+  .hint{ margin:.1rem 0 0; color:var(--muted); font-size:.85rem; letter-spacing:.02em; transition:opacity .3s; }
+  .hint .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--teal); margin-right:.5em; vertical-align:middle; }
+  .stage.live ~ .hint .dot{ animation:pulse 1.3s ease-out infinite; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 rgba(45,212,191,.5)} 100%{box-shadow:0 0 0 12px rgba(45,212,191,0)} }
+
+  /* 内层毛玻璃文本框 */
+  .field{ width:100%; min-height:3.4rem; display:flex; align-items:center;
+    padding:1rem 1.25rem; border-radius:16px;
+    background:var(--glass); border:1px solid var(--glass-brd);
+    box-shadow:inset 0 1px 0 var(--hi);
+    backdrop-filter:blur(20px) saturate(1.4); -webkit-backdrop-filter:blur(20px) saturate(1.4);
+    font-size:clamp(1rem,2.6vw,1.18rem); text-align:left; line-height:1.5; }
+  .field .placeholder{ color:var(--muted); }
+  .caret{ display:inline-block; width:2px; height:1.15em; background:var(--teal); margin-left:1px;
+    vertical-align:text-bottom; animation:blink 1s steps(1) infinite; }
+  @keyframes blink{ 50%{opacity:0} }
+
+  .tag{ color:var(--fg); opacity:.85; font-size:clamp(.95rem,2.4vw,1.08rem); margin:0; max-width:36ch; line-height:1.55; }
+  .cta{ display:flex; gap:.9rem; flex-wrap:wrap; justify-content:center; }
+  .btn{ text-decoration:none; font-weight:600; font-size:.96rem; padding:.72rem 1.6rem; border-radius:999px; transition:transform .15s ease; }
+  .btn:hover{ transform:translateY(-2px) }
+  .btn:focus-visible{ outline:2px solid var(--teal); outline-offset:3px }
+  .btn.primary{ color:var(--btn-fg); background:linear-gradient(100deg,var(--teal),var(--indigo)); box-shadow:0 6px 24px rgba(108,92,231,.35); }
+  .btn.ghost{ color:var(--fg); background:var(--glass); border:1px solid var(--glass-brd);
+    box-shadow:inset 0 1px 0 var(--hi); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); }
+  .price{ color:var(--muted); font-size:.84rem; margin:0; }
+  @media (prefers-reduced-motion:reduce){ .btn{transition:none} .caret{animation:none} }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+
+  <main class="card">
+    <h1 class="word">Saya</h1>
+
+    <div class="stage" id="stage" role="button" tabindex="0" aria-label="Click to hear Saya and watch the text appear">
+      <canvas id="wave" aria-hidden="true"></canvas>
+    </div>
+    <p class="hint" id="hint">click to try</p>
+
+    <div class="field" id="field">
+      <span class="typed" id="typed"><span class="placeholder">Speak…</span></span><span class="caret" id="caret"></span>
+    </div>
+
+    <p class="tag">Speak, and your words land at the cursor — in English and 中文.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/Doris26/saya">Download</a>
+      <a class="btn ghost" href="https://github.com/Doris26/saya">GitHub</a>
+    </div>
+    <p class="price">Free &amp; open-source · bring your own API key</p>
+  </main>
+
+<script>
+(function(){
+  const c=document.getElementById('wave'), ctx=c.getContext('2d');
+  const stage=document.getElementById('stage'), hint=document.getElementById('hint'), typed=document.getElementById('typed');
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rootCss=getComputedStyle(document.documentElement);
+  const DEMO="帮我 review 这个 PR,然后 merge 到 main 分支。";
+
+  let W,H,DPR;
+  function size(){ DPR=Math.min(devicePixelRatio||1,2); W=c.clientWidth; H=c.clientHeight;
+    c.width=W*DPR; c.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0); }
+  size(); addEventListener('resize', size);
+
+  function grad(){ const g=ctx.createLinearGradient(0,0,W,0);
+    g.addColorStop(0, rootCss.getPropertyValue('--teal').trim()||'#2DD4BF');
+    g.addColorStop(1, rootCss.getPropertyValue('--indigo').trim()||'#6C5CE7'); return g; }
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill(); }
+
+  const BARS=54, smooth=new Array(BARS).fill(0);
+  let t=0, talking=false, energy=0;
+  function frame(){
+    ctx.clearRect(0,0,W,H);
+    const mid=H/2, gap=W/BARS; ctx.fillStyle=grad(); energy*=0.9;
+    for(let i=0;i<BARS;i++){
+      const win=Math.pow(Math.sin(Math.PI*i/(BARS-1)),0.85); let target;
+      if(talking){ const wave=0.5*Math.sin(i*0.6-t*7)+0.5*Math.sin(i*0.27+t*5);
+        target=win*(0.12+energy*0.9)*(0.4+0.6*Math.abs(wave)); }
+      else{ const breath=0.5+0.5*Math.sin(t*0.9); const wave=0.5*Math.sin(i*0.5-t*3)+0.5*Math.sin(i*0.23+t*2);
+        target=win*(0.16+0.2*breath)*(0.4+0.6*Math.abs(wave)); }
+      smooth[i]+=(target-smooth[i])*(talking?0.45:0.12);
+      const w=Math.max(2.5,gap*0.42), h=Math.max(w,smooth[i]*H*0.92);
+      roundRect(i*gap+gap*0.5-w/2, mid-h/2, w, h, w/2);
+    }
+    t+=reduce?0:0.016; requestAnimationFrame(frame);
+  }
+  frame();
+
+  let playing=false;
+  function play(){
+    if(playing) return; playing=true;
+    stage.classList.add('live');
+    hint.innerHTML='<span class="dot"></span>Saya is speaking…';
+    typed.textContent=''; talking=true;
+
+    const chars=[...DEMO], total=3200, start=performance.now(); let shown=0;
+    (function type(now){
+      const p=Math.min(1,((now||performance.now())-start)/total);
+      const want=Math.floor(p*chars.length);
+      if(want>shown){ shown=want; typed.textContent=chars.slice(0,shown).join(''); energy=Math.min(1,energy+0.5); }
+      if(p<1) requestAnimationFrame(type); else finish();
+    })(start);
+
+    if('speechSynthesis' in window){
+      try{ speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance(DEMO); u.lang='zh-CN'; u.rate=0.98;
+        const zh=speechSynthesis.getVoices().find(v=>/zh|Chinese/i.test(v.lang+v.name));
+        if(zh) u.voice=zh; speechSynthesis.speak(u);
+      }catch(e){}
+    }
+    function finish(){ typed.textContent=DEMO; talking=false; playing=false;
+      stage.classList.remove('live'); hint.textContent='click to replay'; }
+  }
+  stage.addEventListener('click', play);
+  stage.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); play(); }});
+  if('speechSynthesis' in window){ speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged=()=>speechSynthesis.getVoices(); }
+})();
+</script>
+</body>
+</html>
