@@ -6,13 +6,19 @@ struct MenuBarView: View {
     let coordinator: AppCoordinator
 
     var body: some View {
-        Text(coordinator.state.statusLine)
+        Text(coordinator.statusLine)
         Text("热键 \(coordinator.hotkey.displayString) · 已触发 \(coordinator.hotkeyFireCount) 次")
 
         Divider()
 
         Button(coordinator.state == .recording ? "停止录音" : "开始录音") {
             coordinator.toggleRecording()
+        }
+
+        if coordinator.lastRecordingURL != nil {
+            Button("在访达中显示最近录音") {
+                coordinator.revealLastRecording()
+            }
         }
 
         Divider()
