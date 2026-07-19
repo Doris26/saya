@@ -18,6 +18,33 @@ public struct Hotkey: Codable, Equatable, Sendable {
         carbonModifiers: UInt32(controlKey | optionKey)
     )
 
+    public enum ValidationError: LocalizedError, Equatable {
+        case modifierOnly
+        case optionOnlyForbidden // macOS 15+ 禁 option-only/option+shift-only(-9868,grill #10)
+        case noModifier
+
+        public var errorDescription: String? {
+            switch self {
+            case .modifierOnly: "请再按一个字母/数字键"
+            case .optionOnlyForbidden: "系统不允许仅用 ⌥/⇧ 的组合,请加 ⌃ 或 ⌘"
+            case .noModifier: "请至少加一个修饰键(⌃⌥⌘⇧)"
+            }
+        }
+    }
+
+    /// 录制到的组合是否可注册(grill #10:option-only / option+shift-only 会被 macOS 15+ 拒)
+    public static func validate(keyCode: UInt32?, carbonModifiers: UInt32) throws {
+        let hasControl = carbonModifiers & UInt32(controlKey) != 0
+        let hasCommand = carbonModifiers & UInt32(cmdKey) != 0
+        let hasOption = carbonModifiers & UInt32(optionKey) != 0
+        let hasShift = carbonModifiers & UInt32(shiftKey) != 0
+        guard keyCode != nil else { throw ValidationError.modifierOnly }
+        guard hasControl || hasCommand || hasOption || hasShift else { throw ValidationError.noModifier }
+        if !hasControl && !hasCommand && (hasOption || hasShift) {
+            throw ValidationError.optionOnlyForbidden
+        }
+    }
+
     public static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         var carbon: UInt32 = 0
         if flags.contains(.command) { carbon |= UInt32(cmdKey) }
@@ -36,13 +63,44 @@ public struct Hotkey: Codable, Equatable, Sendable {
         return parts + keyName
     }
 
-    private var keyName: String {
-        switch Int(keyCode) {
-        case kVK_ANSI_V: "V"
-        case kVK_ANSI_R: "R"
-        case kVK_Space: "Space"
-        default: "#\(keyCode)"
+    /// 从录制到的 NSEvent 构造(keyCode + 修饰键翻译);修饰键单独按下时 event.keyCode 无意义,由调用方保证是完整组合
+    public init(event: NSEvent) {
+        self.keyCode = UInt32(event.keyCode)
+        self.carbonModifiers = Hotkey.carbonModifiers(from: event.modifierFlags)
+    }
+
+    public var keyName: String {
+        if let name = Hotkey.keyNames[Int(keyCode)] { return name }
+        // 字母/数字:用当前键盘布局翻译 keyCode → 字符
+        if let translated = Hotkey.character(for: keyCode) { return translated.uppercased() }
+        return "#\(keyCode)"
+    }
+
+    private static let keyNames: [Int: String] = [
+        kVK_Space: "Space", kVK_Return: "↩", kVK_Tab: "⇥", kVK_Escape: "⎋",
+        kVK_Delete: "⌫", kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
+        kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9",
+        kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+        kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+    ]
+
+    private static func character(for keyCode: UInt32) -> String? {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let layoutData = Unmanaged<CFData>.fromOpaque(layoutPtr).takeUnretainedValue() as Data
+        var deadKeys: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let result = layoutData.withUnsafeBytes { raw -> OSStatus in
+            let keyLayout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress!
+            return UCKeyTranslate(
+                keyLayout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0,
+                UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                &deadKeys, chars.count, &length, &chars
+            )
         }
+        guard result == noErr, length > 0 else { return nil }
+        return String(utf16CodeUnits: chars, count: length)
     }
 }
 

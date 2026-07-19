@@ -13,5 +13,17 @@ struct AIVoiceInputApp: App {
         } label: {
             Image(systemName: coordinator.state.menuBarSymbol)
         }
+
+        Settings {
+            SettingsView(coordinator: coordinator)
+        }
+
+        // 首启引导窗(未配 key 或未授权时展示)
+        Window("欢迎", id: "onboarding") {
+            OnboardingView(coordinator: coordinator) {
+                NSApplication.shared.keyWindow?.close()
+            }
+        }
+        .windowResizability(.contentSize)
     }
 }

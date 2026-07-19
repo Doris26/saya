@@ -38,10 +38,8 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("设置…") {
-            // M4: 设置窗口(General / Hotkey / Advanced)
-        }
-        .disabled(true)
+        SettingsLink { Text("设置…") }
+            .keyboardShortcut(",")
 
         Divider()
 

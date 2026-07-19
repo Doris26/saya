@@ -33,7 +33,8 @@ final class AppCoordinator {
     private(set) var lastTranscript: String?
     private(set) var lastNote: String?
     private(set) var failedRecordingURL: URL?
-    let hotkey: Hotkey = .defaultToggle
+    let settings: SettingsStore
+    var hotkey: Hotkey { settings.hotkey }
 
     @ObservationIgnored private let hotkeyManager = HotkeyManager()
     @ObservationIgnored private let recorder = AudioRecorder()
@@ -72,13 +73,39 @@ final class AppCoordinator {
         }
     }
 
-    init() {
+    init(settings: SettingsStore = SettingsStore()) {
+        self.settings = settings
         registerHotkey()
         recorder.onAutoStop = { [weak self] url in
             // grill #5:5min cap 的自动停止走完整转写但永不自动注入(M3 起也一样)
             self?.handleRecordingFinished(url: url, autoStopped: true)
         }
         sweepStaleAudio()
+    }
+
+    /// 设置里改了热键 → 立即重注册(PLAN §2.1:先 Unregister 再注册)
+    func applyHotkeyChange() {
+        registerHotkey()
+    }
+
+    /// 「测试连接」:用当前 key 打一发轻量请求,回报结果
+    func testAPIKey() async -> String {
+        let key = settings.effectiveAPIKey
+        guard !key.isEmpty else { return "未配置 API Key" }
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return "无响应" }
+            switch http.statusCode {
+            case 200: return "连接成功 ✓"
+            case 401: return "Key 无效(401)"
+            default: return "HTTP \(http.statusCode)"
+            }
+        } catch {
+            return "网络错误:\(error.localizedDescription)"
+        }
     }
 
     // MARK: - 热键转移表
@@ -238,14 +265,25 @@ final class AppCoordinator {
     // MARK: - Transcription (M2)
 
     private func transcribe(url: URL, autoStopped: Bool) {
-        // 开发期从 sourced 环境读;M4 切 Keychain 且 release 忽略 env(grill #29)
-        let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        // Keychain 优先,dev 期回落 env(release 忽略,grill #29)——统一走 SettingsStore
+        let apiKey = settings.effectiveAPIKey
+        guard !apiKey.isEmpty else {
+            failedRecordingURL = url
+            state = .error("未配置 API Key——请在 设置 里填写")
+            lastNote = "未配置 API Key(音频已保留,填 Key 后可重试)"
+            playSound("Basso")
+            return
+        }
         state = .transcribing
         transcribeTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let started = Date()
-                let result = try await self.transcriber.transcribe(fileURL: url, apiKey: apiKey)
+                let result = try await self.transcriber.transcribe(
+                    fileURL: url, apiKey: apiKey,
+                    model: self.settings.model,
+                    prompt: self.buildPrompt()
+                )
                 let elapsed = Date().timeIntervalSince(started)
                 self.lastTranscript = result.text
                 self.failedRecordingURL = nil
@@ -287,13 +325,22 @@ final class AppCoordinator {
         }
     }
 
+    /// 强制简体是硬性(简繁非确定性,FINDINGS);标点/去口头禅按设置拼(prompt 保持短,计费,grill）
+    private func buildPrompt() -> String {
+        var parts = ["中文使用简体中文输出。"]
+        if settings.autoPunctuation { parts.append("请输出带标点的书面文本。Punctuate properly.") }
+        if settings.removeFillers { parts.append("去除嗯呃等口头禅。Remove filler words.") }
+        return parts.joined()
+    }
+
     // MARK: - Injection (M3)
 
     private func injectTranscript(_ text: String) async {
         state = .injecting
         defer { pendingFocus = nil }
+        let method = TextInjector.Method(rawValue: settings.injectionMethod) ?? .auto
         do {
-            let outcome = try await injector.inject(text, method: .auto, expectedFocus: pendingFocus)
+            let outcome = try await injector.inject(text, method: method, expectedFocus: pendingFocus)
             state = .idle
             switch outcome {
             case .attempted(let method):
@@ -361,16 +408,17 @@ final class AppCoordinator {
 
     private func registerHotkey() {
         do {
-            try hotkeyManager.register(hotkey) { [weak self] in
+            try hotkeyManager.register(settings.hotkey) { [weak self] in
                 guard let self else { return }
                 hotkeyFireCount += 1
                 Log.hotkey.info("hotkey fired count=\(self.hotkeyFireCount, privacy: .public)")
                 toggleRecording()
             }
-            Log.hotkey.info("registered \(self.hotkey.displayString, privacy: .public)")
+            if case .error = state { state = .idle } // 上次注册失败,这次成功 → 清错
+            Log.hotkey.info("registered \(self.settings.hotkey.displayString, privacy: .public)")
         } catch {
-            // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10);默认 ⌃⌥V 不会踩,自定义键 M4 处理
-            state = .error("热键注册失败(\(hotkey.displayString) 可能被其他 App 占用)")
+            // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10);默认 ⌃⌥V 不会踩,自定义键 M4 校验
+            state = .error("热键注册失败(\(settings.hotkey.displayString) 可能被占用)")
             Log.hotkey.error("register failed: \(String(describing: error), privacy: .public)")
         }
     }
