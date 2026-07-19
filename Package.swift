@@ -23,5 +23,15 @@ let package = Package(
             dependencies: ["AIVoiceInputCore"],
             path: "Tests/AIVoiceInputCoreTests"
         ),
+        // M3 两进程验收 harness(grill #13;dev/test 工具,不进 bundle.sh)
+        .executableTarget(
+            name: "InjectReceiver",
+            path: "Tools/InjectReceiver"
+        ),
+        .executableTarget(
+            name: "aivi-cli",
+            dependencies: ["AIVoiceInputCore"],
+            path: "Tools/aivi-cli"
+        ),
     ]
 )

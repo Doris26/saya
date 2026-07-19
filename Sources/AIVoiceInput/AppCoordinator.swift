@@ -39,6 +39,9 @@ final class AppCoordinator {
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored private let permissions = PermissionManager()
     @ObservationIgnored private let transcriber = TranscriptionClient()
+    @ObservationIgnored private let injector = TextInjector()
+    /// 停录瞬间(用户按热键=意图锚点)的焦点快照,注入前 recheck(grill #6)
+    @ObservationIgnored private var pendingFocus: FocusSnapshot?
     /// 防重入:mic 授权 dialog await 期间再按热键不得再起一个 startRecording(实测竞态)
     @ObservationIgnored private var isStartingRecording = false
     @ObservationIgnored private var transcribeTask: Task<Void, Never>?
@@ -93,6 +96,7 @@ final class AppCoordinator {
                 isStartingRecording = false
             }
         case .recording:
+            pendingFocus = injector.captureFocus() // 意图锚点:此刻的光标位置才是注入目标
             recordingDuration = recorder.currentTime
             if let url = recorder.stop() {
                 handleRecordingFinished(url: url, autoStopped: false)
@@ -246,12 +250,18 @@ final class AppCoordinator {
                 self.lastTranscript = result.text
                 self.failedRecordingURL = nil
                 self.pendingDeletionURL = url // 【P0#1】不立即删,下次录音开始才删
-                self.state = .idle
                 self.lastNote = String(
                     format: "转写完成(%d 字 · %.1fs%@)",
                     result.text.count, elapsed,
                     result.totalTokens.map { " · \($0) tok" } ?? ""
                 )
+                // M3:注入。5min-cap 自动停永不注入(grill #5,无人值守链禁止)
+                if autoStopped {
+                    self.state = .idle
+                    self.lastNote = "已达 5 分钟上限自动停止——文本在菜单「复制上次转写」"
+                } else {
+                    await self.injectTranscript(result.text)
+                }
                 // 隐私(grill #27):transcript 正文不 .public
                 Log.transcribe.info("ok: \(result.text.count, privacy: .public) chars in \(elapsed, privacy: .public)s")
                 // agent 验收通道(dev only):AIVI_DEBUG_DIR 设置时落 transcript 到 0600 文件,
@@ -274,6 +284,43 @@ final class AppCoordinator {
                 }
             }
             self.transcribeTask = nil
+        }
+    }
+
+    // MARK: - Injection (M3)
+
+    private func injectTranscript(_ text: String) async {
+        state = .injecting
+        defer { pendingFocus = nil }
+        do {
+            let outcome = try await injector.inject(text, method: .auto, expectedFocus: pendingFocus)
+            state = .idle
+            switch outcome {
+            case .attempted(let method):
+                // 粘贴成功不可探测(P0#1)——语义是「已尝试」,找回路径常驻菜单
+                lastNote = "已输入(\(method == .paste ? "粘贴" : "打字")法)· 找回:菜单「复制上次转写」"
+                Log.inject.info("attempted via \(method.rawValue, privacy: .public)")
+            case .refusedSecureContext(let culprit):
+                // P0#2:secure 拒注不落剪贴板,文本只留菜单
+                lastNote = "检测到安全输入\(culprit.map { "(\($0))" } ?? "")已拒绝注入——文本在菜单"
+                playSound("Basso")
+            case .fellBackToClipboard(let reason):
+                lastNote = "\(reason)——文本已复制到剪贴板"
+                playSound("Basso")
+            }
+        } catch is TextInjector.InjectorError {
+            state = .idle
+            lastNote = "辅助功能未授权——文本在菜单;请在 系统设置→隐私与安全性→辅助功能 打开"
+            playSound("Basso")
+            // 首次触发系统提示 + 直达设置(PLAN §2.4)
+            // kAXTrustedCheckOptionPrompt 是 C 全局 var,Swift 6 判定非并发安全 → 用其原始字符串值
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+            permissions.openAccessibilitySettings()
+        } catch {
+            state = .idle
+            lastNote = "注入异常:\(error.localizedDescription)——文本在菜单"
+            playSound("Basso")
         }
     }
 
