@@ -23,7 +23,7 @@ struct OnboardingView: View {
         VStack(spacing: 20) {
             switch step {
             case 0:
-                stepView(icon: "mic.circle.fill", title: "欢迎使用 AI Voice Input",
+                stepView(icon: "mic.circle.fill", title: "欢迎使用 Saya",
                          body: "按全局热键说话,自动转写并输入到光标处。下面几步配置权限与 API Key。",
                          action: "开始") { step = 1 }
             case 1:

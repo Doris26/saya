@@ -54,7 +54,7 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("退出 AI Voice Input") {
+        Button("退出 Saya") {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")

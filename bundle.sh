@@ -43,7 +43,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AI Voice Input 需要麦克风录制您的语音以进行转写。</string>
+    <string>Saya 需要麦克风录制您的语音以进行转写。</string>
 </dict>
 </plist>
 PLIST
