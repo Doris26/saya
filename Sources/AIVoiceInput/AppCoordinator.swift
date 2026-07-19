@@ -73,6 +73,8 @@ final class AppCoordinator {
         }
     }
 
+    @ObservationIgnored private var debugSignalSource: DispatchSourceSignal?
+
     init(settings: SettingsStore = SettingsStore()) {
         self.settings = settings
         registerHotkey()
@@ -81,6 +83,20 @@ final class AppCoordinator {
             self?.handleRecordingFinished(url: url, autoStopped: true)
         }
         sweepStaleAudio()
+        installDebugSignalHook()
+    }
+
+    /// grill #14:内存验收改造——SIGUSR1 触发 toggleRecording,供 bin/leak_harness.sh
+    /// headless 驱动 50 次录/转/注循环(本机无 Instruments,已实测;footprint/leaks 采样)。
+    /// 仅 AIVI_DEBUG_DIR 设置时挂,生产不装。
+    private func installDebugSignalHook() {
+        guard ProcessInfo.processInfo.environment["AIVI_DEBUG_DIR"] != nil else { return }
+        signal(SIGUSR1, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        source.setEventHandler { [weak self] in self?.toggleRecording() }
+        source.resume()
+        debugSignalSource = source
+        Log.app.info("debug SIGUSR1 hook installed")
     }
 
     /// 设置里改了热键 → 立即重注册(PLAN §2.1:先 Unregister 再注册)
@@ -285,12 +301,15 @@ final class AppCoordinator {
                     prompt: self.buildPrompt()
                 )
                 let elapsed = Date().timeIntervalSince(started)
-                self.lastTranscript = result.text
+                // M5:去口头禅本地后处理(保守,默认关;prompt 是第一层)
+                let text = self.settings.removeFillers
+                    ? TextPostProcessor.removeFillers(result.text) : result.text
+                self.lastTranscript = text
                 self.failedRecordingURL = nil
                 self.pendingDeletionURL = url // 【P0#1】不立即删,下次录音开始才删
                 self.lastNote = String(
                     format: "转写完成(%d 字 · %.1fs%@)",
-                    result.text.count, elapsed,
+                    text.count, elapsed,
                     result.totalTokens.map { " · \($0) tok" } ?? ""
                 )
                 // M3:注入。5min-cap 自动停永不注入(grill #5,无人值守链禁止)
@@ -298,15 +317,15 @@ final class AppCoordinator {
                     self.state = .idle
                     self.lastNote = "已达 5 分钟上限自动停止——文本在菜单「复制上次转写」"
                 } else {
-                    await self.injectTranscript(result.text)
+                    await self.injectTranscript(text)
                 }
                 // 隐私(grill #27):transcript 正文不 .public
-                Log.transcribe.info("ok: \(result.text.count, privacy: .public) chars in \(elapsed, privacy: .public)s")
+                Log.transcribe.info("ok: \(text.count, privacy: .public) chars in \(elapsed, privacy: .public)s")
                 // agent 验收通道(dev only):AIVI_DEBUG_DIR 设置时落 transcript 到 0600 文件,
                 // 不经 unified log(unified log 里正文保持 private)
                 if let debugDir = ProcessInfo.processInfo.environment["AIVI_DEBUG_DIR"] {
                     let debugFile = URL(fileURLWithPath: debugDir).appendingPathComponent("last_transcript.txt")
-                    try? result.text.write(to: debugFile, atomically: true, encoding: .utf8)
+                    try? text.write(to: debugFile, atomically: true, encoding: .utf8)
                     try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: debugFile.path)
                 }
             } catch is CancellationError {
