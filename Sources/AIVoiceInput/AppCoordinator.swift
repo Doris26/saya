@@ -33,10 +33,21 @@ final class AppCoordinator {
     private(set) var lastTranscript: String?
     private(set) var lastNote: String?
     private(set) var failedRecordingURL: URL?
+    /// 触发失败提示(fn 模式 CGEventTap 挂载失败=辅助功能未授权)
+    private(set) var triggerNote: String?
     let settings: SettingsStore
     var hotkey: Hotkey { settings.hotkey }
 
+    /// 菜单/状态展示用的触发方式描述
+    var triggerDisplay: String {
+        switch settings.triggerMode {
+        case .fnKey: "🌐 fn 单键"
+        case .combo: settings.hotkey.displayString
+        }
+    }
+
     @ObservationIgnored private let hotkeyManager = HotkeyManager()
+    @ObservationIgnored private let fnMonitor = FnKeyMonitor()
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored private let permissions = PermissionManager()
     @ObservationIgnored private let transcriber = TranscriptionClient()
@@ -77,7 +88,7 @@ final class AppCoordinator {
 
     init(settings: SettingsStore = SettingsStore()) {
         self.settings = settings
-        registerHotkey()
+        setupTrigger()
         recorder.onAutoStop = { [weak self] url in
             // grill #5:5min cap 的自动停止走完整转写但永不自动注入(M3 起也一样)
             self?.handleRecordingFinished(url: url, autoStopped: true)
@@ -99,9 +110,9 @@ final class AppCoordinator {
         Log.app.info("debug SIGUSR1 hook installed")
     }
 
-    /// 设置里改了热键 → 立即重注册(PLAN §2.1:先 Unregister 再注册)
+    /// 设置里改了热键或触发模式 → 立即重挂(PLAN §2.1:先注销再注册)
     func applyHotkeyChange() {
-        registerHotkey()
+        setupTrigger()
     }
 
     /// 「测试连接」:用当前 key 打一发轻量请求,回报结果
@@ -425,20 +436,40 @@ final class AppCoordinator {
 
     // MARK: - Hotkey
 
-    private func registerHotkey() {
-        do {
-            try hotkeyManager.register(settings.hotkey) { [weak self] in
-                guard let self else { return }
-                hotkeyFireCount += 1
-                Log.hotkey.info("hotkey fired count=\(self.hotkeyFireCount, privacy: .public)")
-                toggleRecording()
+    /// 按 triggerMode 挂载触发器:fn 模式=CGEventTap 边沿检测,combo 模式=Carbon 热键。
+    private func setupTrigger() {
+        // 先全部注销,避免两个触发器同时活着
+        hotkeyManager.unregisterAll()
+        fnMonitor.stop()
+        triggerNote = nil
+
+        let onFire: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            hotkeyFireCount += 1
+            Log.hotkey.info("trigger fired count=\(self.hotkeyFireCount, privacy: .public)")
+            toggleRecording()
+        }
+
+        switch settings.triggerMode {
+        case .fnKey:
+            if fnMonitor.start(onTap: onFire) {
+                if case .error = state { state = .idle }
+                Log.hotkey.info("trigger=fn key")
+            } else {
+                // CGEventTap 挂载失败 = 辅助功能未授权
+                triggerNote = "fn 监听需要辅助功能授权——请在 系统设置→隐私与安全性→辅助功能 打开"
+                Log.hotkey.error("fn monitor failed to start (accessibility not granted?)")
             }
-            if case .error = state { state = .idle } // 上次注册失败,这次成功 → 清错
-            Log.hotkey.info("registered \(self.settings.hotkey.displayString, privacy: .public)")
-        } catch {
-            // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10);默认 ⌃⌥V 不会踩,自定义键 M4 校验
-            state = .error("热键注册失败(\(settings.hotkey.displayString) 可能被占用)")
-            Log.hotkey.error("register failed: \(String(describing: error), privacy: .public)")
+        case .combo:
+            do {
+                try hotkeyManager.register(settings.hotkey, handler: onFire)
+                if case .error = state { state = .idle }
+                Log.hotkey.info("trigger=combo \(self.settings.hotkey.displayString, privacy: .public)")
+            } catch {
+                // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10)
+                state = .error("热键注册失败(\(settings.hotkey.displayString) 可能被占用)")
+                Log.hotkey.error("register failed: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 }

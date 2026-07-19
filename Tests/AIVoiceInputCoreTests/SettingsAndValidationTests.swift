@@ -64,4 +64,17 @@ import Testing
         // 不写真 keychain,只测掩码逻辑对短/空串的处理
         #expect(store.apiKeyMasked == "(未设置)" || store.apiKeyMasked.hasPrefix("••••"))
     }
+
+    @Test func triggerModeDefaultsToFnKey() {
+        // owner 主交互:默认 fn 单键
+        #expect(freshStore().triggerMode == .fnKey)
+    }
+
+    @Test func triggerModePersists() {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store1 = SettingsStore(defaults: defaults)
+        store1.triggerMode = .combo
+        #expect(SettingsStore(defaults: defaults).triggerMode == .combo)
+    }
 }

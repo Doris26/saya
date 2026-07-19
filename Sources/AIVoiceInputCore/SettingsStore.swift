@@ -10,6 +10,12 @@ public final class SettingsStore {
     public static let keychainService = "com.yujunzou.ai-voice-input"
     public static let keychainAccount = "openai_api_key"
 
+    /// 触发方式(owner 主交互):fn 单键 toggle(默认)/ 自定义组合键
+    public enum TriggerMode: String, CaseIterable, Sendable {
+        case fnKey    // fn(🌐)单键 toggle,走 FnKeyMonitor(CGEventTap)
+        case combo    // 自定义组合键,走 Carbon RegisterEventHotKey(如 ⌃⌥V)
+    }
+
     private enum Key {
         static let model = "model"
         static let injectionMethod = "injectionMethod"
@@ -18,6 +24,7 @@ public final class SettingsStore {
         static let hotkeyKeyCode = "hotkeyKeyCode"
         static let hotkeyModifiers = "hotkeyModifiers"
         static let launchAtLogin = "launchAtLogin"
+        static let triggerMode = "triggerMode"
     }
 
     private let defaults: UserDefaults
@@ -40,6 +47,7 @@ public final class SettingsStore {
             Key.hotkeyKeyCode: Int(Hotkey.defaultToggle.keyCode),
             Key.hotkeyModifiers: Int(Hotkey.defaultToggle.carbonModifiers),
             Key.injectionMethod: "auto",
+            Key.triggerMode: TriggerMode.fnKey.rawValue, // owner 默认:fn 单键
         ])
     }
 
@@ -90,6 +98,11 @@ public final class SettingsStore {
     public var removeFillers: Bool {
         get { defaults.bool(forKey: Key.removeFillers) }
         set { defaults.set(newValue, forKey: Key.removeFillers) }
+    }
+
+    public var triggerMode: TriggerMode {
+        get { TriggerMode(rawValue: defaults.string(forKey: Key.triggerMode) ?? "") ?? .fnKey }
+        set { defaults.set(newValue.rawValue, forKey: Key.triggerMode) }
     }
 
     public var hotkey: Hotkey {

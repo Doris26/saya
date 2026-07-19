@@ -11,7 +11,10 @@ struct MenuBarView: View {
         if let note = coordinator.lastNote {
             Text(note)
         }
-        Text("热键 \(coordinator.hotkey.displayString) · 已触发 \(coordinator.hotkeyFireCount) 次")
+        if let triggerNote = coordinator.triggerNote {
+            Text("⚠️ \(triggerNote)")
+        }
+        Text("触发 \(coordinator.triggerDisplay) · 已触发 \(coordinator.hotkeyFireCount) 次")
 
         Divider()
 

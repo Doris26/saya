@@ -90,7 +90,12 @@
 | `NSEvent.addGlobalMonitorForEvents(.keyDown)` | **需要辅助功能授权**才能收到 keyDown | **不能**(只旁听,按键仍传给前台 App)→ 会往目标 App 里打进一个多余字符 | 沙盒内基本废 | 观察不消费,做热键体验差,仅适合旁听修饰键 |
 | `CGEventTap` | 需要辅助功能/输入监控 | 能 | 不可用(沙盒) | 最强但重;系统在 App 卡顿时会禁用 tap,需监听 `kCGEventTapDisabled*` 重挂 |
 
-**决策**:MVP 用 `RegisterEventHotKey`,默认热键**唯一 `⌃⌥V`**(spike 实测 err=0;**⌥Space 不可用**——macOS 15+ 系统有意禁止 option-only/option+shift-only 组合防键盘记录,注册返回 -9868,FB15168205,grill #10 已 WebSearch 核实;热键录制控件须拒绝 modifiers⊆{option,shift},-9868 给「系统拒绝该组合」专用提示)。toggle 模式:按一下开始、再按结束。**Esc = 取消**:仅 recording 态临时注册 Esc 热键(停止即注销,写明 tradeoff:录音期间系统级占用 Esc),取消丢音频零 API 调用(grill #7)。"双击 Fn"彩蛋放 backlog。
+**触发方式(owner 主交互,2 模式可切,默认 fn)**:
+- **模式 A(默认)= 🌐 fn 单键 toggle**:fn 不是 Carbon 修饰键(RegisterEventHotKey 绑不了),用 **CGEventTap listen-only** 监 `flagsChanged` 的 `maskSecondaryFn` 位边沿。边沿逻辑抽成纯状态机 `FnKeyDetector`(可单测):fnDown→fnUp 且期间无其他键=单击触发;fn+其他键=组合,放行不触发;含长按/去抖守卫。listen-only 不消费事件(fn+X 放行给系统)。**系统冲突**:macOS 默认单按 fn=听写/emoji → onboarding + 设置提示用户改「系统设置→键盘→按下🌐键用于→无操作」。需辅助功能授权(已有);tap 被系统超时禁用时自动重挂。
+- **模式 B = 自定义组合键**:`RegisterEventHotKey`,默认 `⌃⌥V`(录制控件可录任意组合)。
+- `triggerMode`(fn/combo)持久化进 UserDefaults,默认 fn;切换即时重挂(先注销再挂)。Esc 取消两模式通用。
+
+**(模式 B 细节)**:`RegisterEventHotKey`,默认热键**唯一 `⌃⌥V`**(spike 实测 err=0;**⌥Space 不可用**——macOS 15+ 系统有意禁止 option-only/option+shift-only 组合防键盘记录,注册返回 -9868,FB15168205,grill #10 已 WebSearch 核实;热键录制控件须拒绝 modifiers⊆{option,shift},-9868 给「系统拒绝该组合」专用提示)。toggle 模式:按一下开始、再按结束。**Esc = 取消**:仅 recording 态临时注册 Esc 热键(停止即注销,写明 tradeoff:录音期间系统级占用 Esc),取消丢音频零 API 调用(grill #7)。"双击 Fn"彩蛋放 backlog。
 坑:热键注册要在主线程;`InstallEventHandler` 的 target 用 `GetApplicationEventTarget()`(spike 实测 err=0;v1.0 写的 `GetEventDispatcherTarget()` 未实测,不用);换热键 = 先 `UnregisterEventHotKey` 再注册;与系统/其他 App 冲突时 `RegisterEventHotKey` 返回错误码要提示用户换键。
 **实测补充(spike 2,adversarial verify 复现通过)**:①「无需任何权限」CONFIRMED——`AXIsProcessTrusted()=false` 全程 4/4 收到 `⌃⌥V`,零 TCC 弹窗;②修饰键换算实测 `[.control,.option]` NSEvent raw 786432 → carbon 6144 = 0x1800,必须按位翻译不能 raw cast;③ **Swift 6 language mode 坑**:`@convention(c)` 的 `EventHandlerUPP` 回调不能捕获上下文,顶层/共享可变状态被 nonisolated 回调触碰时必须 `nonisolated(unsafe)`(或走 `userData` 传 `Unmanaged` 指针 + `MainActor.assumeIsolated`);④必须是真 .app bundle + 活的 NSApplication runloop(`LSUIElement=true` + activationPolicy `.accessory`),裸 SwiftPM 二进制收不到热键。
 

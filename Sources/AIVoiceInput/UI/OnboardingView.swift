@@ -51,6 +51,15 @@ struct OnboardingView: View {
                     }
                 }
             case 4:
+                stepView(icon: "globe", title: "触发方式:fn 单键",
+                         body: "默认按一下 🌐 fn(地球键)开始录音,再按一下停止。\n\n⚠️ macOS 默认单按 fn 是听写/emoji。请到 系统设置 → 键盘 → 「按下 🌐 键用于」改为「无操作」,否则会和系统冲突。也可稍后在设置里改用组合键。",
+                         action: "打开键盘设置") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                    step = 5
+                }
+            case 5:
                 VStack(spacing: 12) {
                     Image(systemName: "key.fill").font(.system(size: 40)).foregroundStyle(.tint)
                     Text("OpenAI API Key").font(.title2).bold()

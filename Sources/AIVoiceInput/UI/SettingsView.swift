@@ -80,28 +80,60 @@ private struct GeneralSettingsTab: View {
 private struct HotkeySettingsTab: View {
     let coordinator: AppCoordinator
     @State private var recordError = ""
+    @State private var mode: SettingsStore.TriggerMode
+
+    init(coordinator: AppCoordinator) {
+        self.coordinator = coordinator
+        _mode = State(initialValue: coordinator.settings.triggerMode)
+    }
 
     var body: some View {
         Form {
-            Section("录音开始/停止热键") {
-                HotkeyRecorderView(
-                    hotkey: coordinator.settings.hotkey,
-                    onRecorded: { newHotkey in
-                        do {
-                            try Hotkey.validate(keyCode: newHotkey.keyCode,
-                                                carbonModifiers: newHotkey.carbonModifiers)
-                            coordinator.settings.hotkey = newHotkey
-                            coordinator.applyHotkeyChange()
-                            recordError = ""
-                        } catch {
-                            recordError = error.localizedDescription
-                        }
-                    }
-                )
-                if !recordError.isEmpty {
-                    Text(recordError).font(.caption).foregroundStyle(.red)
+            Section("触发方式") {
+                Picker("触发方式", selection: $mode) {
+                    Text("🌐 fn 单键 toggle").tag(SettingsStore.TriggerMode.fnKey)
+                    Text("自定义组合键").tag(SettingsStore.TriggerMode.combo)
                 }
-                Text("按下想用的组合;须含 ⌃ 或 ⌘(系统不允许仅 ⌥/⇧ 的组合)。录音时按 Esc 可取消。")
+                .pickerStyle(.radioGroup)
+                .onChange(of: mode) { _, newMode in
+                    coordinator.settings.triggerMode = newMode
+                    coordinator.applyHotkeyChange()
+                }
+            }
+
+            if mode == .fnKey {
+                Section {
+                    Text("按一下 🌐 fn(地球键)开始录音,再按一下停止。")
+                        .font(.caption)
+                    Text("⚠️ macOS 默认单按 fn 会触发听写/emoji。请到 系统设置 → 键盘 → 「按下 🌐 键用于」改为「无操作」,fn 单键 toggle 才不会和系统冲突。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Section("组合键") {
+                    HotkeyRecorderView(
+                        hotkey: coordinator.settings.hotkey,
+                        onRecorded: { newHotkey in
+                            do {
+                                try Hotkey.validate(keyCode: newHotkey.keyCode,
+                                                    carbonModifiers: newHotkey.carbonModifiers)
+                                coordinator.settings.hotkey = newHotkey
+                                coordinator.applyHotkeyChange()
+                                recordError = ""
+                            } catch {
+                                recordError = error.localizedDescription
+                            }
+                        }
+                    )
+                    if !recordError.isEmpty {
+                        Text(recordError).font(.caption).foregroundStyle(.red)
+                    }
+                    Text("按下想用的组合;须含 ⌃ 或 ⌘(系统不允许仅 ⌥/⇧ 的组合)。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Text("录音时按 Esc 可取消(两种模式通用)。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
