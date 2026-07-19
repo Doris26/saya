@@ -3,9 +3,9 @@
 set -euo pipefail
 
 # PRODUCT = 面向用户的产品名(.app / 显示名);TARGET = SwiftPM 可执行 target 名(编译产物,勿改)
-PRODUCT="LingoFlow"
+PRODUCT="Saya"
 TARGET="AIVoiceInput"
-BUNDLE_ID="com.yujunzou.lingoflow"
+BUNDLE_ID="com.yujunzou.saya"
 VERSION="0.1.0"
 CONFIG="release"
 
@@ -31,7 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>            <string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key>     <string>LingoFlow</string>
+    <key>CFBundleDisplayName</key>     <string>Saya</string>
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundleIdentifier</key>      <string>$BUNDLE_ID</string>
