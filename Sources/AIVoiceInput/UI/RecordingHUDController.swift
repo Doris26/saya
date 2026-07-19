@@ -17,6 +17,9 @@ final class HUDViewState {
     var content: HUDContent = .hidden
     var seconds: Int = 0
     var levels: [Float] = []   // 归一化 0…1 波形样本(最近若干个)
+    var recordingLabel = "Listening…"
+    var transcribingLabel = "Transcribing…"
+    var doneLabel = "Inserted"
 }
 
 /// 屏幕底部居中的录音浮层控制器。状态驱动:按 fn 那一刻(state→recording)立即弹出,
@@ -50,11 +53,14 @@ final class RecordingHUDController {
     }
 
     /// 状态刷新入口。控制器只据 HUDContent 决定显隐;波形/计时的实时细节由 SwiftUI 读 viewState。
-    func render(phase: HUDPhase, justCompleted: Bool, seconds: Int, levels: [Float], enabled: Bool) {
+    func render(phase: HUDPhase, justCompleted: Bool, seconds: Int, levels: [Float], enabled: Bool, l10n: L10n) {
         let content = HUDPresenter.content(phase: phase, justCompleted: justCompleted, enabled: enabled)
         viewState.content = content
         viewState.seconds = seconds
         viewState.levels = levels
+        viewState.recordingLabel = l10n.t(.hudRecording)
+        viewState.transcribingLabel = l10n.t(.hudTranscribing)
+        viewState.doneLabel = l10n.t(.hudDone)
         if content.isVisible { show() } else { hide() }
     }
 
@@ -114,7 +120,7 @@ private struct HUDView: View {
             capsule {
                 HStack(spacing: 8) {
                     Circle().fill(.red).frame(width: 9, height: 9)
-                    Text("正在听…").font(.system(size: 12, weight: .medium))
+                    Text(state.recordingLabel).font(.system(size: 12, weight: .medium))
                     Waveform(levels: state.levels)
                         .frame(width: 60, height: 18)
                     Text(timeString).font(.system(size: 12, weight: .medium).monospacedDigit())
@@ -125,14 +131,14 @@ private struct HUDView: View {
             capsule {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("转写中…").font(.system(size: 12, weight: .medium))
+                    Text(state.transcribingLabel).font(.system(size: 12, weight: .medium))
                 }
             }
         case .done:
             capsule {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text("已输入").font(.system(size: 12, weight: .medium))
+                    Text(state.doneLabel).font(.system(size: 12, weight: .medium))
                 }
             }
         }

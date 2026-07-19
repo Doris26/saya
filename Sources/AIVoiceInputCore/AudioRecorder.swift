@@ -8,10 +8,12 @@ public final class AudioRecorder: NSObject {
         case noInputDevice
         case startFailed
 
-        public var errorDescription: String? {
+        public var errorDescription: String? { localized(L10n(.zh)) }
+
+        public func localized(_ l10n: L10n) -> String {
             switch self {
-            case .noInputDevice: "没有可用的音频输入设备"
-            case .startFailed: "录音启动失败"
+            case .noInputDevice: return l10n.t(.errNoInputDevice)
+            case .startFailed: return l10n.t(.errStartFailed)
             }
         }
     }

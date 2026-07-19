@@ -6,15 +6,16 @@ struct SettingsView: View {
     let coordinator: AppCoordinator
 
     var body: some View {
+        let l = coordinator.l10n
         TabView {
             GeneralSettingsTab(coordinator: coordinator)
-                .tabItem { Label("通用", systemImage: "gearshape") }
+                .tabItem { Label(l.t(.tabGeneral), systemImage: "gearshape") }
             HotkeySettingsTab(coordinator: coordinator)
-                .tabItem { Label("快捷键", systemImage: "keyboard") }
-            AdvancedSettingsTab(settings: coordinator.settings)
-                .tabItem { Label("高级", systemImage: "slider.horizontal.3") }
+                .tabItem { Label(l.t(.tabShortcut), systemImage: "keyboard") }
+            AdvancedSettingsTab(coordinator: coordinator)
+                .tabItem { Label(l.t(.tabAdvanced), systemImage: "slider.horizontal.3") }
         }
-        .frame(width: 460, height: 340)
+        .frame(width: 480, height: 380)
     }
 }
 
@@ -27,28 +28,38 @@ private struct GeneralSettingsTab: View {
     private var settings: SettingsStore { coordinator.settings }
 
     var body: some View {
+        let l = coordinator.l10n
         Form {
-            Section("OpenAI API Key") {
-                // 已保存时占位符改成明确提示,避免空 SecureField 的 "sk-…" 占位被误认成残留 key
+            Section(l.t(.secLanguage)) {
+                Picker(l.t(.langLabel), selection: Binding(
+                    get: { settings.language },
+                    set: { settings.language = $0 }   // @Observable → 即时重渲染
+                )) {
+                    Text(l.t(.langSystem)).tag(AppLanguage.system)
+                    Text(l.t(.langZh)).tag(AppLanguage.zh)
+                    Text(l.t(.langEn)).tag(AppLanguage.en)
+                }
+            }
+            Section(l.t(.secAPIKey)) {
                 let hasKey = !settings.effectiveAPIKey.isEmpty
                 HStack {
-                    SecureField(hasKey ? "粘贴新 Key 可更换(留空保留当前)" : "sk-…", text: $apiKeyField)
-                    Button("保存") {
+                    SecureField(hasKey ? l.t(.apiKeyPlaceholderHas) : l.t(.apiKeyPlaceholderEmpty), text: $apiKeyField)
+                    Button(l.t(.btnSave)) {
                         settings.apiKey = apiKeyField
                         apiKeyField = ""
-                        testResult = "已保存 ✓(\(settings.apiKeyMasked))"
+                        testResult = l.t(.savedMasked, settings.apiKeyMasked)
                     }
                     .disabled(apiKeyField.isEmpty)
                 }
                 HStack {
                     if hasKey {
-                        Label("已保存:\(settings.apiKeyMasked)", systemImage: "checkmark.circle.fill")
+                        Label(l.t(.labelSaved, settings.apiKeyMasked), systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Text("未配置").foregroundStyle(.secondary)
+                        Text(l.t(.labelNotConfigured)).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(testing ? "测试中…" : "测试连接") {
+                    Button(testing ? l.t(.btnTesting) : l.t(.btnTest)) {
                         testing = true
                         Task {
                             testResult = await coordinator.testAPIKey()
@@ -61,36 +72,34 @@ private struct GeneralSettingsTab: View {
                     Text(testResult).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("注入方式") {
-                Picker("注入方式", selection: Binding(
+            Section(l.t(.secInjection)) {
+                Picker(l.t(.secInjection), selection: Binding(
                     get: { settings.injectionMethod },
                     set: { settings.injectionMethod = $0 }
                 )) {
-                    Text("自动(粘贴优先)").tag("auto")
-                    Text("剪贴板 + ⌘V").tag("paste")
-                    Text("模拟打字").tag("type")
+                    Text(l.t(.injAuto)).tag("auto")
+                    Text(l.t(.injPaste)).tag("paste")
+                    Text(l.t(.injType)).tag("type")
                 }
                 .pickerStyle(.radioGroup)
             }
             Section {
-                Toggle("开机自动启动", isOn: Binding(
+                Toggle(l.t(.toggleLaunch), isOn: Binding(
                     get: { settings.launchAtLogin },
                     set: { settings.launchAtLogin = $0 }
                 ))
-                Toggle("显示录音浮层(屏幕底部)", isOn: Binding(
+                Toggle(l.t(.toggleHUD), isOn: Binding(
                     get: { settings.showHUD },
                     set: { settings.showHUD = $0; coordinator.applyHUDSetting() }
                 ))
             }
-            Section("用量 / 花费") {
+            Section(l.t(.secUsage)) {
                 let usage = coordinator.usageSummary
-                LabeledContent("本月", value: String(
-                    format: "%.0f 分钟 · ¥%.2f($%.3f)",
+                LabeledContent(l.t(.usageMonth), value: l.t(.usageMonthValue,
                     usage.monthMinutes, usage.monthCostCNY, usage.monthCostUSD))
-                LabeledContent("今日", value: String(
-                    format: "%.0f 分钟 · ¥%.2f", usage.todayMinutes, usage.todayCostCNY))
-                Text("按音频时长 × 分钟价记账(gpt-4o-transcribe $0.006/min、mini $0.003/min);¥ 按约 7.2 汇率展示。记录存 ~/Library/Application Support/Saya/usage.jsonl。")
-                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent(l.t(.usageToday), value: l.t(.usageTodayValue,
+                    usage.todayMinutes, usage.todayCostCNY, usage.todayCostUSD))
+                Text(l.t(.usageNote)).font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -109,11 +118,12 @@ private struct HotkeySettingsTab: View {
     }
 
     var body: some View {
+        let l = coordinator.l10n
         Form {
-            Section("触发方式") {
-                Picker("触发方式", selection: $mode) {
-                    Text("🌐 fn 单键 toggle").tag(SettingsStore.TriggerMode.fnKey)
-                    Text("自定义组合键").tag(SettingsStore.TriggerMode.combo)
+            Section(l.t(.secTrigger)) {
+                Picker(l.t(.secTrigger), selection: $mode) {
+                    Text(l.t(.trigFn)).tag(SettingsStore.TriggerMode.fnKey)
+                    Text(l.t(.trigCombo)).tag(SettingsStore.TriggerMode.combo)
                 }
                 .pickerStyle(.radioGroup)
                 .onChange(of: mode) { _, newMode in
@@ -124,15 +134,14 @@ private struct HotkeySettingsTab: View {
 
             if mode == .fnKey {
                 Section {
-                    Text("按一下 🌐 fn(地球键)开始录音,再按一下停止。")
-                        .font(.caption)
-                    Text("⚠️ macOS 默认单按 fn 会触发听写/emoji。请到 系统设置 → 键盘 → 「按下 🌐 键用于」改为「无操作」,fn 单键 toggle 才不会和系统冲突。")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(l.t(.fnHint1)).font(.caption)
+                    Text(l.t(.fnHint2)).font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Section("组合键") {
+                Section(l.t(.secCombo)) {
                     HotkeyRecorderView(
                         hotkey: coordinator.settings.hotkey,
+                        prompt: l.t(.recorderPrompt),
                         onRecorded: { newHotkey in
                             do {
                                 try Hotkey.validate(keyCode: newHotkey.keyCode,
@@ -140,6 +149,8 @@ private struct HotkeySettingsTab: View {
                                 coordinator.settings.hotkey = newHotkey
                                 coordinator.applyHotkeyChange()
                                 recordError = ""
+                            } catch let error as Hotkey.ValidationError {
+                                recordError = error.localized(l)
                             } catch {
                                 recordError = error.localizedDescription
                             }
@@ -148,14 +159,12 @@ private struct HotkeySettingsTab: View {
                     if !recordError.isEmpty {
                         Text(recordError).font(.caption).foregroundStyle(.red)
                     }
-                    Text("按下想用的组合;须含 ⌃ 或 ⌘(系统不允许仅 ⌥/⇧ 的组合)。")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(l.t(.comboHint)).font(.caption).foregroundStyle(.secondary)
                 }
             }
 
             Section {
-                Text("录音时按 Esc 可取消(两种模式通用)。")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(l.t(.escHint)).font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -164,30 +173,31 @@ private struct HotkeySettingsTab: View {
 }
 
 private struct AdvancedSettingsTab: View {
-    let settings: SettingsStore
+    let coordinator: AppCoordinator
+    private var settings: SettingsStore { coordinator.settings }
 
     var body: some View {
+        let l = coordinator.l10n
         Form {
-            Section("转写") {
-                Picker("模型", selection: Binding(
+            Section(l.t(.secTranscribe)) {
+                Picker(l.t(.modelLabel), selection: Binding(
                     get: { settings.model },
                     set: { settings.model = $0 }
                 )) {
-                    Text("gpt-4o-transcribe(质量)").tag("gpt-4o-transcribe")
-                    Text("gpt-4o-mini-transcribe(省钱)").tag("gpt-4o-mini-transcribe")
+                    Text(l.t(.modelQuality)).tag("gpt-4o-transcribe")
+                    Text(l.t(.modelCheap)).tag("gpt-4o-mini-transcribe")
                 }
             }
-            Section("后处理") {
-                Toggle("自动补标点", isOn: Binding(
+            Section(l.t(.secPost)) {
+                Toggle(l.t(.togglePunct), isOn: Binding(
                     get: { settings.autoPunctuation },
                     set: { settings.autoPunctuation = $0 }
                 ))
-                Toggle("去除口头禅(嗯/呃/like…)", isOn: Binding(
+                Toggle(l.t(.toggleFillers), isOn: Binding(
                     get: { settings.removeFillers },
                     set: { settings.removeFillers = $0 }
                 ))
-                Text("去口头禅较激进,可能误删内容;逐字场景建议关闭。")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(l.t(.fillersHint)).font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -6,23 +6,27 @@ import SwiftUI
 /// 点击进入录制态 → 下一个带修饰键的按键组合被捕获 → 回调。
 struct HotkeyRecorderView: NSViewRepresentable {
     let hotkey: Hotkey
+    let prompt: String
     let onRecorded: (Hotkey) -> Void
 
     func makeNSView(context: Context) -> RecorderButton {
         let button = RecorderButton()
         button.onRecorded = onRecorded
+        button.recordingPrompt = prompt
         button.update(hotkey: hotkey)
         return button
     }
 
     func updateNSView(_ nsView: RecorderButton, context: Context) {
         nsView.onRecorded = onRecorded
+        nsView.recordingPrompt = prompt
         if !nsView.isRecording { nsView.update(hotkey: hotkey) }
     }
 }
 
 final class RecorderButton: NSButton {
     var onRecorded: ((Hotkey) -> Void)?
+    var recordingPrompt = "Press keys…"
     private(set) var isRecording = false
     private var monitor: Any?
 
@@ -43,7 +47,7 @@ final class RecorderButton: NSButton {
     @objc private func startRecording() {
         guard !isRecording else { return }
         isRecording = true
-        title = "按下组合…(Esc 取消)"
+        title = recordingPrompt
         // 本地 monitor:录制窗聚焦时截获 keyDown/flagsChanged
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self else { return event }

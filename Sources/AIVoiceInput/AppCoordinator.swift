@@ -42,10 +42,13 @@ final class AppCoordinator {
     let settings: SettingsStore
     var hotkey: Hotkey { settings.hotkey }
 
+    /// 当前取词器(视图读它;language 变即重渲染)
+    var l10n: L10n { settings.l10n }
+
     /// 菜单/状态展示用的触发方式描述
     var triggerDisplay: String {
         switch settings.triggerMode {
-        case .fnKey: "🌐 fn 单键"
+        case .fnKey: l10n.t(.triggerFnKey)
         case .combo: settings.hotkey.displayString
         }
     }
@@ -81,16 +84,17 @@ final class AppCoordinator {
     var statusLine: String {
         switch state {
         case .idle:
-            return "空闲"
+            return l10n.t(.statusIdle)
         case .recording:
             let level = levelDB.map { String(format: " · %.0f dB", $0) } ?? ""
-            return "录音中… \(recordingSeconds / 60):\(String(format: "%02d", recordingSeconds % 60))\(level)"
+            let time = "\(recordingSeconds / 60):\(String(format: "%02d", recordingSeconds % 60))"
+            return l10n.t(.statusRecording, time + level)
         case .transcribing:
-            return "转写中…"
+            return l10n.t(.statusTranscribing)
         case .injecting:
-            return "输入中…"
+            return l10n.t(.statusInjecting)
         case .error(let message):
-            return "错误:\(message)"
+            return l10n.t(.statusError, message)
         }
     }
 
@@ -124,7 +128,8 @@ final class AppCoordinator {
     private func refreshHUD() {
         hud.render(
             phase: hudPhase, justCompleted: justCompletedFlash,
-            seconds: recordingSeconds, levels: levelHistory, enabled: settings.showHUD
+            seconds: recordingSeconds, levels: levelHistory, enabled: settings.showHUD,
+            l10n: settings.l10n
         )
     }
 
@@ -166,20 +171,20 @@ final class AppCoordinator {
     /// 「测试连接」:用当前 key 打一发轻量请求,回报结果
     func testAPIKey() async -> String {
         let key = settings.effectiveAPIKey
-        guard !key.isEmpty else { return "未配置 API Key" }
+        guard !key.isEmpty else { return l10n.t(.testNoKey) }
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return "无响应" }
+            guard let http = response as? HTTPURLResponse else { return l10n.t(.testNoResp) }
             switch http.statusCode {
-            case 200: return "连接成功 ✓"
-            case 401: return "Key 无效(401)"
-            default: return "HTTP \(http.statusCode)"
+            case 200: return l10n.t(.testOK)
+            case 401: return l10n.t(.testBadKey)
+            default: return l10n.t(.testHTTP, http.statusCode)
             }
         } catch {
-            return "网络错误:\(error.localizedDescription)"
+            return l10n.t(.testNetErr, error.localizedDescription)
         }
     }
 
@@ -220,7 +225,7 @@ final class AppCoordinator {
             }
             leaveRecordingState()
             state = .idle
-            lastNote = "已取消录音(音频已丢弃)"
+            lastNote = l10n.t(.noteCancelled)
             playSound("Basso")
             Log.app.info("recording cancelled")
         case .transcribing:
@@ -240,7 +245,7 @@ final class AppCoordinator {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        lastNote = "已复制到剪贴板"
+        lastNote = l10n.t(.noteCopied)
     }
 
     func revealLastRecording() {
@@ -253,12 +258,12 @@ final class AppCoordinator {
     private func startRecording() async {
         switch permissions.micPermission {
         case .denied:
-            state = .error("麦克风权限被拒绝——请在 系统设置→隐私与安全性→麦克风 打开")
+            state = .error(l10n.t(.errMicDenied))
             permissions.openMicrophoneSettings()
             return
         case .undetermined:
             guard await permissions.requestMicAccess() else {
-                state = .error("未获得麦克风权限")
+                state = .error(l10n.t(.errMicNotGranted))
                 return
             }
         case .granted:
@@ -289,7 +294,8 @@ final class AppCoordinator {
             try? hotkeyManager.registerCancelKey { [weak self] in self?.cancel() }
             startMeterLoop()
         } catch {
-            state = .error(error.localizedDescription)
+            let message = (error as? AudioRecorder.RecorderError)?.localized(l10n) ?? error.localizedDescription
+            state = .error(message)
             Log.audio.error("start failed: \(String(describing: error), privacy: .public)")
         }
     }
@@ -309,7 +315,7 @@ final class AppCoordinator {
         guard recordingDuration >= Self.minDuration else {
             try? FileManager.default.removeItem(at: url)
             state = .idle
-            lastNote = "录音过短(<0.7s)已丢弃"
+            lastNote = l10n.t(.noteTooShort)
             Log.app.info("discarded: too short (\(self.recordingDuration, privacy: .public)s)")
             return
         }
@@ -317,11 +323,10 @@ final class AppCoordinator {
         guard maxLevelDB >= Self.speechLevelFloorDB else {
             failedRecordingURL = url
             state = .idle
-            lastNote = String(format: "未检测到语音(峰值 %.0f dB)已跳过转写,可从菜单重试", maxLevelDB)
+            lastNote = l10n.t(.noteNoSpeech, maxLevelDB)
             Log.app.info("skipped API: max level \(self.maxLevelDB, privacy: .public) below floor")
             return
         }
-        if autoStopped { lastNote = "已达 5 分钟上限自动停止" }
         transcribe(url: url, autoStopped: autoStopped)
     }
 
@@ -352,8 +357,8 @@ final class AppCoordinator {
         let apiKey = settings.effectiveAPIKey
         guard !apiKey.isEmpty else {
             failedRecordingURL = url
-            state = .error("未配置 API Key——请在 设置 里填写")
-            lastNote = "未配置 API Key(音频已保留,填 Key 后可重试)"
+            state = .error(l10n.t(.errNoKeySettings))
+            lastNote = l10n.t(.noteNoKey)
             playSound("Basso")
             return
         }
@@ -374,11 +379,11 @@ final class AppCoordinator {
                 self.lastTranscript = text
                 self.failedRecordingURL = nil
                 self.pendingDeletionURL = url // 【P0#1】不立即删,下次录音开始才删
-                self.lastNote = String(
-                    format: "转写完成(%d 字 · %.1fs%@)",
-                    text.count, elapsed,
-                    result.totalTokens.map { " · \($0) tok" } ?? ""
-                )
+                if let tok = result.totalTokens {
+                    self.lastNote = self.l10n.t(.noteTranscribedTokens, text.count, elapsed, tok)
+                } else {
+                    self.lastNote = self.l10n.t(.noteTranscribed, text.count, elapsed)
+                }
                 // 计费追踪:按音频时长 × 分钟价记一条(OpenAI 这俩模型按分钟计费)
                 let seconds = self.recordingDuration
                 let cost = UsageStore.costUSD(model: self.settings.model, seconds: seconds)
@@ -390,7 +395,7 @@ final class AppCoordinator {
                 // M3:注入。5min-cap 自动停永不注入(grill #5,无人值守链禁止)
                 if autoStopped {
                     self.state = .idle
-                    self.lastNote = "已达 5 分钟上限自动停止——文本在菜单「复制上次转写」"
+                    self.lastNote = self.l10n.t(.noteAutoStopCap)
                 } else {
                     await self.injectTranscript(text)
                 }
@@ -404,13 +409,13 @@ final class AppCoordinator {
                     try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: debugFile.path)
                 }
             } catch is CancellationError {
-                self.handleTranscribeFailure(url: url, note: "已取消转写(音频保留,可重试)")
+                self.handleTranscribeFailure(url: url, note: self.l10n.t(.noteCancelledTranscribe))
             } catch let error as TranscriptionClient.TranscriptionError {
-                self.handleTranscribeFailure(url: url, note: error.localizedDescription)
+                self.handleTranscribeFailure(url: url, note: error.localized(self.l10n))
             } catch {
                 let urlError = error as? URLError
                 if urlError?.code == .cancelled {
-                    self.handleTranscribeFailure(url: url, note: "已取消转写(音频保留,可重试)")
+                    self.handleTranscribeFailure(url: url, note: self.l10n.t(.noteCancelledTranscribe))
                 } else {
                     self.handleTranscribeFailure(url: url, note: error.localizedDescription)
                 }
@@ -440,22 +445,23 @@ final class AppCoordinator {
                 // 粘贴成功不可探测(P0#1)——语义是「已尝试」,找回路径常驻菜单
                 justCompletedFlash = true       // 先置,再 state=.idle 让 didSet 看到 → HUD「✓ 已输入」
                 state = .idle
-                lastNote = "已输入(\(method == .paste ? "粘贴" : "打字")法)· 找回:菜单「复制上次转写」"
+                let methodName = l10n.t(method == .paste ? .methodPaste : .methodType)
+                lastNote = l10n.t(.noteInserted, methodName)
                 Log.inject.info("attempted via \(method.rawValue, privacy: .public)")
                 scheduleFlashClear()
             case .refusedSecureContext(let culprit):
                 // P0#2:secure 拒注不落剪贴板,文本只留菜单
                 state = .idle
-                lastNote = "检测到安全输入\(culprit.map { "(\($0))" } ?? "")已拒绝注入——文本在菜单"
+                lastNote = l10n.t(.noteRefusedSecure, culprit.map { "(\($0))" } ?? "")
                 playSound("Basso")
-            case .fellBackToClipboard(let reason):
+            case .fellBackToClipboard(let reasonKey):
                 state = .idle
-                lastNote = "\(reason)——文本已复制到剪贴板"
+                lastNote = l10n.t(.noteFellBack, l10n.t(reasonKey))
                 playSound("Basso")
             }
         } catch is TextInjector.InjectorError {
             state = .idle
-            lastNote = "辅助功能未授权——文本在菜单;请在 系统设置→隐私与安全性→辅助功能 打开"
+            lastNote = l10n.t(.noteAXDenied)
             playSound("Basso")
             // 首次触发系统提示 + 直达设置(PLAN §2.4)
             // kAXTrustedCheckOptionPrompt 是 C 全局 var,Swift 6 判定非并发安全 → 用其原始字符串值
@@ -464,7 +470,7 @@ final class AppCoordinator {
             permissions.openAccessibilitySettings()
         } catch {
             state = .idle
-            lastNote = "注入异常:\(error.localizedDescription)——文本在菜单"
+            lastNote = l10n.t(.noteInjectError, error.localizedDescription)
             playSound("Basso")
         }
     }
@@ -525,7 +531,7 @@ final class AppCoordinator {
                 Log.hotkey.info("trigger=fn key")
             } else {
                 // CGEventTap 挂载失败 = 辅助功能未授权
-                triggerNote = "fn 监听需要辅助功能授权——请在 系统设置→隐私与安全性→辅助功能 打开"
+                triggerNote = l10n.t(.triggerNoteFnAX)
                 Log.hotkey.error("fn monitor failed to start (accessibility not granted?)")
             }
         case .combo:
@@ -535,7 +541,7 @@ final class AppCoordinator {
                 Log.hotkey.info("trigger=combo \(self.settings.hotkey.displayString, privacy: .public)")
             } catch {
                 // -9868 = macOS 15+ 拒绝 option-only 组合(grill #10)
-                state = .error("热键注册失败(\(settings.hotkey.displayString) 可能被占用)")
+                state = .error(l10n.t(.errHotkeyRegister, settings.hotkey.displayString))
                 Log.hotkey.error("register failed: \(String(describing: error), privacy: .public)")
             }
         }

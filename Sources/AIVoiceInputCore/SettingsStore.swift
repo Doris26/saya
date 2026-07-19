@@ -26,6 +26,7 @@ public final class SettingsStore {
         static let launchAtLogin = "launchAtLogin"
         static let triggerMode = "triggerMode"
         static let showHUD = "showHUD"
+        static let language = "language"
     }
 
     private let defaults: UserDefaults
@@ -50,6 +51,7 @@ public final class SettingsStore {
             Key.injectionMethod: "auto",
             Key.triggerMode: TriggerMode.fnKey.rawValue, // owner 默认:fn 单键
             Key.showHUD: true, // 录音浮层默认开
+            Key.language: AppLanguage.system.rawValue, // 默认跟随系统
         ])
     }
 
@@ -111,6 +113,14 @@ public final class SettingsStore {
         get { defaults.bool(forKey: Key.showHUD) }
         set { defaults.set(newValue, forKey: Key.showHUD) }
     }
+
+    public var language: AppLanguage {
+        get { AppLanguage(rawValue: defaults.string(forKey: Key.language) ?? "") ?? .system }
+        set { defaults.set(newValue.rawValue, forKey: Key.language) }
+    }
+
+    /// 当前生效的取词器(界面读它;language 变 → @Observable 触发重渲染)
+    public var l10n: L10n { L10n(language) }
 
     public var hotkey: Hotkey {
         get {

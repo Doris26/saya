@@ -1,100 +1,105 @@
 # Saya
 
-**中英文语音输入,按 `fn` 说话,文字直接落到光标处。** macOS 菜单栏小工具,纯本地、无服务器,只用苹果原生框架 + OpenAI API。
+*English · [中文](README.zh.md)*
 
-> 为**中英文混说**而生 —— 一句话里中英夹杂("帮我 review 这个 PR")照样准。**按量付费,每分钟约 ¥0.04($0.006)**,重度用一天口述 30 分钟也就几块钱一个月,没有订阅、没有月费。
+**Bilingual voice-to-text for macOS. Press `fn`, speak, and your words land at the cursor.** A menu-bar app — fully local, no server, built only on Apple-native frameworks + the OpenAI API.
 
-## 为什么用它
+> Built for **mixing English and 中文 in one breath** — a sentence like "帮我 review this PR then merge 到 main" transcribes cleanly. **Pay-as-you-go at ~$0.006/min** — 30 minutes of dictation a day runs about **$5/month**, with no subscription and no monthly fee.
 
-| | Saya | 订阅制听写 App(如 Wispr Flow) |
+## Why Saya
+
+| | Saya | Subscription dictation apps (e.g. Wispr Flow) |
 |---|---|---|
-| **中英文混说** | ✅ 原生,一句话里中英夹杂照样准 | 多为英文优先 |
-| **价格** | **按量付费 ≈ ¥0.04/分钟**,用多少付多少 | 订阅 $12–15/月固定 |
-| **数据** | 纯本地,音频不留存(下次录音即删),只把该段音频发 OpenAI 转写 | 依产品而定 |
-| **触发** | `fn` 单键 toggle(或自定义组合键) | 各异 |
-| **开源** | ✅ 代码全公开,自己编自己签 | ❌ |
+| **Chinese + English mixed** | ✅ Native — mixed-language sentences stay accurate | Usually English-first |
+| **Price** | **Pay-as-you-go ≈ $0.006/min**, pay for what you use | Fixed **$12–15/month** subscription |
+| **Data** | Local-only; audio is deleted on the next recording, and only that clip is sent to OpenAI to transcribe | Varies by product |
+| **Trigger** | `fn` single-key toggle (or a custom shortcut) | Varies |
+| **Open source** | ✅ Full source — build and sign it yourself | ❌ |
+| **UI** | Bilingual (中/EN), switch instantly in Settings | — |
 
-## 快速开始
+## Quick start
 
 ```bash
 git clone https://github.com/Doris26/saya.git
 cd saya
-./bundle.sh                          # → dist/Saya.app
-open dist/Saya.app              # 菜单栏出现 🎙️ 图标(无 Dock 图标)
+./bundle.sh                     # → dist/Saya.app
+open dist/Saya.app              # a 🎙️ icon appears in the menu bar (no Dock icon)
 ```
 
-> 需 macOS 14+ 与 Swift 6.1+(命令行工具即可,**不需要 Xcode**)。`swift --version` 能跑就行。
+> Requires macOS 14+ and Swift 6.1+ (Command Line Tools are enough — **no Xcode needed**). If `swift --version` runs, you're set.
 
-首次运行走引导:麦克风 → 辅助功能 → 通知 → 触发方式 → 填 OpenAI API Key。
+First launch walks you through: Microphone → Accessibility → Notifications → Trigger → OpenAI API key.
 
-**触发方式**(设置 → 快捷键 里可切):
-- **🌐 `fn` 单键 toggle(默认)**:按一下 `fn` 开始录音,再按一下停止 → 转写 → 注入到光标处。
-  > ⚠️ macOS 默认单按 `fn` 是听写/emoji。请到 **系统设置 → 键盘 →「按下 🌐 键用于」→ 无操作**(引导里会提示)。
-- **自定义组合键**:如 **⌃⌥V**(可录任意组合;须含 ⌃ 或 ⌘)。
+**Trigger** (switchable in Settings → Shortcut):
+- **🌐 `fn` single-key toggle (default)**: press `fn` once to start recording, again to stop → transcribe → insert at the cursor.
+  > ⚠️ macOS uses a single `fn` press for dictation/emoji by default. Go to **System Settings → Keyboard → "Press 🌐 key to" → Do Nothing** (onboarding reminds you).
+- **Custom shortcut**: e.g. **⌃⌥V** (record any combo; must include ⌃ or ⌘).
 
-录音时按 **Esc** 取消。菜单栏图标随状态变:🎙️ 待命 / 🔴 录音 / ⏳ 转写 / ⚠️ 出错。
+Press **Esc** while recording to cancel. The menu-bar icon reflects state: 🎙️ idle / 🔴 recording / ⏳ transcribing / ⚠️ error.
 
-**录音浮层**:屏幕底部会弹出一个小浮窗——按下触发键那一刻立即出现(给「看不见的 fn 键」一个即时回执),显示 🔴 正在听 + 实时电平波形 + 计时,转写完成闪现「✓ 已输入」后淡出。**不抢焦点、点击穿透**,不影响你正在打字的窗口。设置里可关。
+**Recording overlay**: a small pill appears at the bottom of the screen the instant you press the trigger (an instant receipt for the "invisible" `fn` key), showing 🔴 Listening + a live audio waveform + a timer, then flashing "✓ Inserted" before fading out. It **never steals focus and is click-through**, so it can't disturb the window you're typing into. Toggle it off in Settings.
 
-**花费追踪**:菜单栏下拉和设置里显示本月/今日累计分钟数与花费(¥ 和 $),用自己的 API Key、按量计费,一目了然。记录存本地 `~/Library/Application Support/Saya/usage.jsonl`。
+**Cost tracking**: the menu and Settings show cumulative minutes and spend for this month and today (in $ and ¥). You use your own API key and pay per use — fully transparent. Records are stored locally at `~/Library/Application Support/Saya/usage.jsonl`.
 
-## 价格 / 成本
+**Interface language**: 中文 / English / follow system — switch in Settings → General, applied instantly.
 
-- **模型 `gpt-4o-transcribe` ≈ $0.006/分钟(约 ¥0.04)**。
-- 一天口述 30 分钟 ≈ **$5.4/月**;偶尔用基本感觉不到花钱。
-- 省钱可在高级设置切 **`gpt-4o-mini-transcribe`(半价)**。
-- 你只出 OpenAI 的转写费,**App 本身免费、无订阅、无抽成**。用自己的 API Key,花费一目了然。
+## Pricing / cost
 
-## 中英文支持
+- **`gpt-4o-transcribe` ≈ $0.006/min**.
+- ~30 min of dictation a day ≈ **$5.4/month**; occasional use is barely noticeable.
+- To save more, switch to **`gpt-4o-mini-transcribe` (half price)** in Advanced settings.
+- You only pay OpenAI's transcription fee — **the app itself is free, no subscription, no markup.** Bring your own API key; costs are fully visible.
 
-- 一句话里**中英夹杂**是设计的核心场景(技术口述常见:"把这个 function 重构一下,然后 merge 到 main")。
-- 默认 prompt 强制**简体中文 + 自动标点**(实测 OpenAI 有时随机吐繁体,已在 prompt 层锁死简体)。
-- CJK 输入法激活时自动走粘贴注入(避免文字掉进拼音缓冲)。
-- `language` 留空最稳,让模型自行判定中/英边界。
+## Chinese + English support
 
-## 权限
+- **Mixing Chinese and English in one sentence** is the core design case (common in tech dictation: "把这个 function 重构一下, then merge 到 main").
+- The default prompt enforces **Simplified Chinese + automatic punctuation** (OpenAI occasionally returns Traditional Chinese; the prompt locks it to Simplified).
+- When a CJK input method is active, Saya inserts via paste (so text doesn't fall into the pinyin buffer).
+- Leaving `language` unset is the most robust — the model decides the Chinese/English boundary itself.
 
-| 权限 | 用途 | 怎么给 |
+## Permissions
+
+| Permission | Purpose | How to grant |
 |---|---|---|
-| 麦克风 | 录音 | 首次录音弹窗点「允许」 |
-| 辅助功能 | 把文字注入到其他 App | 系统设置→隐私与安全性→辅助功能→打开 Saya(注入必需) |
-| 通知 | 注入结果/错误提示 | 引导里允许 |
+| Microphone | Recording | Click "Allow" on the first-recording prompt |
+| Accessibility | Insert text into other apps | System Settings → Privacy & Security → Accessibility → enable Saya (required for insertion) |
+| Notifications | Insertion result / error alerts | Allow during onboarding |
 
-> App Sandbox 必须关闭(注入文字、post CGEvent 在沙盒内被禁),故走站外分发,不上 Mac App Store(同 Raycast/MacWhisper)。
+> App Sandbox must be off (inserting text and posting CGEvents is forbidden inside the sandbox), so Saya ships outside the Mac App Store (like Raycast / MacWhisper).
 
-## 架构
+## Architecture
 
 ```
-触发(fn 单键:CGEventTap 边沿检测 / 组合键:Carbon RegisterEventHotKey)
-  → AudioRecorder(AVAudioRecorder m4a 16k/mono/32kbps)
-  → 静音三层 gate(<0.7s 丢弃 / 电平未过底跳过 API / 5min-cap 只通知不注入)
-  → TranscriptionClient(multipart → gpt-4o-transcribe,强制简体 prompt)
-  → TextInjector(SecureInput gate → secure-field 拒注 → 焦点 recheck → IME gate
-                 → 剪贴板+⌘V 主 / CGEvent 打字备)
-所有模块经 AppCoordinator(@MainActor @Observable 状态机)编排,互相不引用。
-API Key 进 Keychain;设置进 UserDefaults。
+Trigger (fn: CGEventTap edge detection / combo: Carbon RegisterEventHotKey)
+  → AudioRecorder (AVAudioRecorder m4a 16k/mono/32kbps)
+  → 3-layer silence gate (<0.7s discard / below noise floor skip API / 5-min cap notify-only)
+  → TranscriptionClient (multipart → gpt-4o-transcribe, Simplified-Chinese prompt)
+  → TextInjector (SecureInput gate → secure-field refusal → focus recheck → IME gate
+                  → clipboard+⌘V primary / CGEvent typing fallback)
+All modules are orchestrated by AppCoordinator (a @MainActor @Observable state machine); they never reference each other.
+API key lives in the Keychain; settings in UserDefaults; all user-facing strings go through L10n (zh/en).
 ```
 
-- `Sources/AIVoiceInputCore/` — 可测 library(热键/录音/转写/注入/设置/Keychain/后处理)
-- `Sources/AIVoiceInput/` — thin executable(App/Coordinator/UI)
-- `Tools/` — 注入验收 harness(`InjectReceiver` + `aivi-cli`)
-- `bin/` — 验收脚本(`m3_harness.sh` 注入、`leak_harness.sh` 内存)
+- `Sources/AIVoiceInputCore/` — testable library (hotkey / recording / transcription / injection / settings / Keychain / post-processing / L10n)
+- `Sources/AIVoiceInput/` — thin executable (App / Coordinator / UI)
+- `Tools/` — injection acceptance harness (`InjectReceiver` + `aivi-cli`)
+- `bin/` — acceptance scripts (`m3_harness.sh` injection, `leak_harness.sh` memory)
 
 ```bash
-swift test                           # 单元测试
+swift test                      # unit tests
 ```
 
-## 关键设计决策(实测支撑)
+## Key design decisions (empirically backed)
 
-- **注入成功不可探测**(CGEventPost fire-and-forget)→ 兜底 = 转写始终可从菜单「复制上次转写」找回。
-- **密码/Secure 输入拒注绝不落剪贴板**(防口述密码广播)。
-- **静音会幻觉**(实测 30s 纯静音 5/5 返回幻觉中文)→ 电平 gate 是 load-bearing 防线。
-- **随机吐繁体** → 默认 prompt 强制简体。
+- **Insertion success is undetectable** (CGEventPost is fire-and-forget) → fallback = the transcript is always recoverable from the menu's "Copy last transcript".
+- **Secure/password fields are refused and never touch the clipboard** (prevents broadcasting a spoken password).
+- **Silence hallucinates** (measured: 30s of pure silence returned hallucinated Chinese 5/5 times) → the level gate is a load-bearing defense.
+- **Random Traditional Chinese output** → the default prompt forces Simplified.
 
-## 分发
+## Distribution
 
-本机 ad-hoc 开发**零阻塞、免费**。要装到第二台 Mac / 给别人 / 免去每次重建重授权,买 **Apple Developer Program($99/年)** 一次解三锁(keychain、稳定 TCC 授权、公证分发)。见 `PLAN.md §6`。
+Local ad-hoc development is **free and unblocked**. To install on a second Mac, share with others, or avoid re-granting permissions on every rebuild, buy the **Apple Developer Program ($99/yr)** — one purchase unlocks all three (Keychain, stable TCC grants, notarized distribution). See `PLAN.md §6`.
 
 ---
 
-MIT License · 用自己的 OpenAI API Key,数据不经第三方服务器。
+MIT License · Bring your own OpenAI API key; your data never passes through a third-party server.

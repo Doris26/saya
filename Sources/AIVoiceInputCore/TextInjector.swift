@@ -25,7 +25,7 @@ public final class TextInjector {
         /// secure 上下文拒注(P0#2:绝不进剪贴板,transcript 只留菜单)
         case refusedSecureContext(culprit: String?)
         /// 焦点变了/AX 未授权 → 文本落剪贴板(带 ConcealedType,N 分钟自动清)
-        case fellBackToClipboard(reason: String)
+        case fellBackToClipboard(reasonKey: LocKey)
     }
 
     public enum InjectorError: LocalizedError {
@@ -96,7 +96,7 @@ public final class TextInjector {
         if let expected = expectedFocus, !focusMatches(expected) {
             Log.inject.info("focus changed since capture -> clipboard fallback")
             fallbackToClipboard(text)
-            return .fellBackToClipboard(reason: "目标窗口/输入框已变化")
+            return .fellBackToClipboard(reasonKey: .reasonFocusChanged)
         }
 
         // 链 4:CJK IME gate(grill #11)——IME 激活时打字法会进拼音组合缓冲,强制走粘贴

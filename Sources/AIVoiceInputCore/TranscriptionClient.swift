@@ -19,24 +19,19 @@ public final class TranscriptionClient: Sendable {
         case server(status: Int, message: String)
         case emptyTranscript
 
-        public var errorDescription: String? {
+        public var errorDescription: String? { localized(L10n(.zh)) }
+
+        /// 本地化文案(用户可见);errorDescription 回落中文供日志。
+        public func localized(_ l10n: L10n) -> String {
             switch self {
-            case .missingAPIKey:
-                "未配置 OpenAI API Key(开发期:从环境变量 OPENAI_API_KEY 读)"
-            case .fileTooLarge(let bytes):
-                "录音文件过大(\(bytes / 1024 / 1024) MB > 25 MB 上限)"
-            case .invalidKey:
-                "API Key 无效(401)——请检查 Key"
-            case .rateLimited:
-                "请求过于频繁(429)——稍后重试"
-            case .timeout:
-                "转写超时(30s)——请检查网络"
-            case .network(let detail):
-                "网络错误:\(detail)"
-            case .server(let status, let message):
-                "服务端错误(\(status)):\(message)"
-            case .emptyTranscript:
-                "转写结果为空"
+            case .missingAPIKey: return l10n.t(.terrNoKey)
+            case .fileTooLarge(let bytes): return l10n.t(.terrTooLarge, bytes / 1024 / 1024)
+            case .invalidKey: return l10n.t(.terrInvalidKey)
+            case .rateLimited: return l10n.t(.terrRateLimited)
+            case .timeout: return l10n.t(.terrTimeout)
+            case .network(let detail): return l10n.t(.terrNetwork, detail)
+            case .server(let status, let message): return l10n.t(.terrServer, status, message)
+            case .emptyTranscript: return l10n.t(.terrEmpty)
             }
         }
     }

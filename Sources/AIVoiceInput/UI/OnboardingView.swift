@@ -4,7 +4,7 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
-/// 首启引导:欢迎 → 麦克风 → 辅助功能 → 通知 → API Key → 完成(PLAN §2.4)。
+/// 首启引导:欢迎 → 麦克风 → 辅助功能 → 通知 → 触发方式 → API Key → 完成(PLAN §2.4)。
 /// 权限无系统回调 → 用 Timer 轮询状态,变绿自动前进。
 struct OnboardingView: View {
     let coordinator: AppCoordinator
@@ -20,30 +20,29 @@ struct OnboardingView: View {
     private let permissions = PermissionManager()
 
     var body: some View {
+        let l = coordinator.l10n
         VStack(spacing: 20) {
             switch step {
             case 0:
-                stepView(icon: "mic.circle.fill", title: "欢迎使用 Saya",
-                         body: "按全局热键说话,自动转写并输入到光标处。下面几步配置权限与 API Key。",
-                         action: "开始") { step = 1 }
+                stepView(icon: "mic.circle.fill", title: l.t(.obWelcomeTitle),
+                         body: l.t(.obWelcomeBody), action: l.t(.obStart)) { step = 1 }
             case 1:
-                stepView(icon: "mic.fill", title: "麦克风权限",
-                         body: micGranted ? "已授权 ✓" : "用于录制语音。点下面按钮授权。",
-                         action: micGranted ? "下一步" : "授权麦克风") {
+                stepView(icon: "mic.fill", title: l.t(.obMicTitle),
+                         body: micGranted ? l.t(.obMicBodyGranted) : l.t(.obMicBody),
+                         action: micGranted ? l.t(.obNext) : l.t(.obGrantMic)) {
                     if micGranted { step = 2 } else {
                         Task { _ = await permissions.requestMicAccess(); refresh() }
                     }
                 }
             case 2:
-                stepView(icon: "accessibility", title: "辅助功能权限",
-                         body: axGranted ? "已授权 ✓" : "用于把文字输入到当前 App。请在系统设置里打开开关(会自动检测)。",
-                         action: axGranted ? "下一步" : "打开系统设置") {
+                stepView(icon: "accessibility", title: l.t(.obAXTitle),
+                         body: axGranted ? l.t(.obAXBodyGranted) : l.t(.obAXBody),
+                         action: axGranted ? l.t(.obNext) : l.t(.obOpenSettings)) {
                     if axGranted { step = 3 } else { permissions.openAccessibilitySettings() }
                 }
             case 3:
-                stepView(icon: "bell.badge", title: "通知权限",
-                         body: "注入结果、设备切换等提示需要通知。",
-                         action: "允许通知") {
+                stepView(icon: "bell.badge", title: l.t(.obNotifTitle),
+                         body: l.t(.obNotifBody), action: l.t(.obAllowNotif)) {
                     Task {
                         _ = try? await UNUserNotificationCenter.current()
                             .requestAuthorization(options: [.alert, .sound])
@@ -51,9 +50,8 @@ struct OnboardingView: View {
                     }
                 }
             case 4:
-                stepView(icon: "globe", title: "触发方式:fn 单键",
-                         body: "默认按一下 🌐 fn(地球键)开始录音,再按一下停止。\n\n⚠️ macOS 默认单按 fn 是听写/emoji。请到 系统设置 → 键盘 → 「按下 🌐 键用于」改为「无操作」,否则会和系统冲突。也可稍后在设置里改用组合键。",
-                         action: "打开键盘设置") {
+                stepView(icon: "globe", title: l.t(.obTriggerTitle),
+                         body: l.t(.obTriggerBody), action: l.t(.obOpenKeyboard)) {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
                         NSWorkspace.shared.open(url)
                     }
@@ -62,15 +60,15 @@ struct OnboardingView: View {
             case 5:
                 VStack(spacing: 12) {
                     Image(systemName: "key.fill").font(.system(size: 40)).foregroundStyle(.tint)
-                    Text("OpenAI API Key").font(.title2).bold()
-                    SecureField("sk-…", text: $apiKeyField).frame(width: 300)
-                    Button("保存并完成") {
+                    Text(l.t(.obKeyTitle)).font(.title2).bold()
+                    SecureField(l.t(.apiKeyPlaceholderEmpty), text: $apiKeyField).frame(width: 300)
+                    Button(l.t(.obSaveFinish)) {
                         if !apiKeyField.isEmpty { settings.apiKey = apiKeyField }
                         settings.launchAtLogin = true // grill #20:默认开
                         finish()
                     }
                     .disabled(apiKeyField.isEmpty && settings.effectiveAPIKey.isEmpty)
-                    Button("稍后设置") { settings.launchAtLogin = true; finish() }
+                    Button(l.t(.obLater)) { settings.launchAtLogin = true; finish() }
                         .buttonStyle(.link)
                 }
             default:
@@ -78,7 +76,7 @@ struct OnboardingView: View {
             }
         }
         .padding(40)
-        .frame(width: 460, height: 320)
+        .frame(width: 480, height: 340)
         .onAppear { startPolling() }
         .onDisappear { poll?.invalidate() }
     }

@@ -23,11 +23,13 @@ public struct Hotkey: Codable, Equatable, Sendable {
         case optionOnlyForbidden // macOS 15+ 禁 option-only/option+shift-only(-9868,grill #10)
         case noModifier
 
-        public var errorDescription: String? {
+        public var errorDescription: String? { localized(L10n(.zh)) }
+
+        public func localized(_ l10n: L10n) -> String {
             switch self {
-            case .modifierOnly: "请再按一个字母/数字键"
-            case .optionOnlyForbidden: "系统不允许仅用 ⌥/⇧ 的组合,请加 ⌃ 或 ⌘"
-            case .noModifier: "请至少加一个修饰键(⌃⌥⌘⇧)"
+            case .modifierOnly: return l10n.t(.valModifierOnly)
+            case .optionOnlyForbidden: return l10n.t(.valOptionOnly)
+            case .noModifier: return l10n.t(.valNoModifier)
             }
         }
     }
