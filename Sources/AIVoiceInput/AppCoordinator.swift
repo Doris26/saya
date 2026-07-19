@@ -35,10 +35,12 @@ enum AppState: Equatable {
 @MainActor
 @Observable
 final class AppCoordinator {
-    private(set) var state: AppState = .idle
+    private(set) var state: AppState = .idle { didSet { refreshHUD() } }
     private(set) var hotkeyFireCount = 0
     private(set) var levelDB: Float?
     private(set) var recordingSeconds = 0
+    /// 用量/花费汇总(菜单+设置展示;每次转写后刷新)
+    private(set) var usageSummary = UsageSummary.empty
     /// 【P0#1】注入成功不可探测 → 内存保留最近一次转写,菜单可复制(唯一找回路径)
     private(set) var lastTranscript: String?
     private(set) var lastNote: String?
@@ -58,6 +60,12 @@ final class AppCoordinator {
 
     @ObservationIgnored private let hotkeyManager = HotkeyManager()
     @ObservationIgnored private let fnMonitor = FnKeyMonitor()
+    @ObservationIgnored private lazy var hud = RecordingHUDController()
+    @ObservationIgnored private let usageStore = UsageStore()
+    /// 注入刚完成的 ~1s 闪现窗口(HUD「✓ 已输入」)
+    @ObservationIgnored private var justCompletedFlash = false
+    /// 归一化电平历史(HUD 波形数据源,最近 24 样本)
+    @ObservationIgnored private var levelHistory: [Float] = []
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored private let permissions = PermissionManager()
     @ObservationIgnored private let transcriber = TranscriptionClient()
@@ -105,7 +113,45 @@ final class AppCoordinator {
         }
         sweepStaleAudio()
         installDebugSignalHook()
+        refreshUsage()
     }
+
+    // MARK: - HUD
+
+    private var hudPhase: HUDPhase {
+        switch state {
+        case .idle: .idle
+        case .recording: .recording
+        case .transcribing: .transcribing
+        case .injecting: .injecting
+        case .error: .error
+        }
+    }
+
+    /// 状态/波形/开关任一变化 → 刷新浮层(按 fn 那一刻 state→recording 即触发,立即弹出)
+    private func refreshHUD() {
+        hud.render(
+            phase: hudPhase, justCompleted: justCompletedFlash,
+            seconds: recordingSeconds, levels: levelHistory, enabled: settings.showHUD
+        )
+    }
+
+    /// 设置里切 HUD 开关时调用
+    func applyHUDSetting() { refreshHUD() }
+
+    /// 「✓ 已输入」闪现 ~1.2s 后清除(仅当仍在 idle,避免打断下一次录音)
+    private func scheduleFlashClear() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard let self, self.state == .idle, self.justCompletedFlash else { return }
+            self.justCompletedFlash = false
+            self.refreshHUD()
+        }
+    }
+
+    // MARK: - 用量
+
+    private func refreshUsage() { usageSummary = usageStore.summary(now: Date()) }
 
     /// grill #14:内存验收改造——SIGUSR1 触发 toggleRecording,供 bin/leak_harness.sh
     /// headless 驱动 50 次录/转/注循环(本机无 Instruments,已实测;footprint/leaks 采样)。
@@ -241,8 +287,11 @@ final class AppCoordinator {
         do {
             try recorder.start()
             maxLevelDB = -160
+            levelHistory = []           // HUD 波形从空开始
+            recordingSeconds = 0
+            justCompletedFlash = false  // 清掉上一轮可能残留的「✓」闪现
             lastNote = nil
-            state = .recording
+            state = .recording          // didSet → refreshHUD → 浮层立即弹出(按 fn 即时回执)
             playSound("Pop") // grill #9:开始提示音(全屏/notch 下唯一反馈)
             // grill #7:仅录音期间临时注册 Esc 取消(tradeoff:此间系统级占用 Esc)
             try? hotkeyManager.registerCancelKey { [weak self] in self?.cancel() }
@@ -284,17 +333,22 @@ final class AppCoordinator {
         transcribe(url: url, autoStopped: autoStopped)
     }
 
-    /// 录音期间 5Hz 刷电平/秒数/最大电平(menu-tracking-safe:Task 非 default-mode Timer,grill #17)
+    /// 录音期间 ~12Hz 刷电平/秒数/波形(menu-tracking-safe:Task 非 default-mode Timer,grill #17)
     private func startMeterLoop() {
         Task { [weak self] in
             while let self, self.state == .recording {
                 if let level = self.recorder.averagePowerDB() {
                     self.levelDB = level
                     self.maxLevelDB = max(self.maxLevelDB, level)
+                    self.levelHistory.append(HUDPresenter.normalizedLevel(db: level))
+                    if self.levelHistory.count > 24 {
+                        self.levelHistory.removeFirst(self.levelHistory.count - 24)
+                    }
                 }
                 self.recordingSeconds = Int(self.recorder.currentTime)
                 self.recordingDuration = self.recorder.currentTime
-                try? await Task.sleep(for: .milliseconds(200))
+                self.refreshHUD()   // 更新波形 + 计时
+                try? await Task.sleep(for: .milliseconds(80))
             }
         }
     }
@@ -333,6 +387,14 @@ final class AppCoordinator {
                     text.count, elapsed,
                     result.totalTokens.map { " · \($0) tok" } ?? ""
                 )
+                // 计费追踪:按音频时长 × 分钟价记一条(OpenAI 这俩模型按分钟计费)
+                let seconds = self.recordingDuration
+                let cost = UsageStore.costUSD(model: self.settings.model, seconds: seconds)
+                self.usageStore.record(UsageRecord(
+                    timestamp: Date(), audioSeconds: seconds, model: self.settings.model,
+                    costUSD: cost, tokens: result.totalTokens, estimated: seconds <= 0
+                ))
+                self.refreshUsage()
                 // M3:注入。5min-cap 自动停永不注入(grill #5,无人值守链禁止)
                 if autoStopped {
                     self.state = .idle
@@ -381,17 +443,21 @@ final class AppCoordinator {
         let method = TextInjector.Method(rawValue: settings.injectionMethod) ?? .auto
         do {
             let outcome = try await injector.inject(text, method: method, expectedFocus: pendingFocus)
-            state = .idle
             switch outcome {
             case .attempted(let method):
                 // 粘贴成功不可探测(P0#1)——语义是「已尝试」,找回路径常驻菜单
+                justCompletedFlash = true       // 先置,再 state=.idle 让 didSet 看到 → HUD「✓ 已输入」
+                state = .idle
                 lastNote = "已输入(\(method == .paste ? "粘贴" : "打字")法)· 找回:菜单「复制上次转写」"
                 Log.inject.info("attempted via \(method.rawValue, privacy: .public)")
+                scheduleFlashClear()
             case .refusedSecureContext(let culprit):
                 // P0#2:secure 拒注不落剪贴板,文本只留菜单
+                state = .idle
                 lastNote = "检测到安全输入\(culprit.map { "(\($0))" } ?? "")已拒绝注入——文本在菜单"
                 playSound("Basso")
             case .fellBackToClipboard(let reason):
+                state = .idle
                 lastNote = "\(reason)——文本已复制到剪贴板"
                 playSound("Basso")
             }

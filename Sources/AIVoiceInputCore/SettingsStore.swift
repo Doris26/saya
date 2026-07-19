@@ -25,6 +25,7 @@ public final class SettingsStore {
         static let hotkeyModifiers = "hotkeyModifiers"
         static let launchAtLogin = "launchAtLogin"
         static let triggerMode = "triggerMode"
+        static let showHUD = "showHUD"
     }
 
     private let defaults: UserDefaults
@@ -48,6 +49,7 @@ public final class SettingsStore {
             Key.hotkeyModifiers: Int(Hotkey.defaultToggle.carbonModifiers),
             Key.injectionMethod: "auto",
             Key.triggerMode: TriggerMode.fnKey.rawValue, // owner 默认:fn 单键
+            Key.showHUD: true, // 录音浮层默认开
         ])
     }
 
@@ -103,6 +105,11 @@ public final class SettingsStore {
     public var triggerMode: TriggerMode {
         get { TriggerMode(rawValue: defaults.string(forKey: Key.triggerMode) ?? "") ?? .fnKey }
         set { defaults.set(newValue.rawValue, forKey: Key.triggerMode) }
+    }
+
+    public var showHUD: Bool {
+        get { defaults.bool(forKey: Key.showHUD) }
+        set { defaults.set(newValue, forKey: Key.showHUD) }
     }
 
     public var hotkey: Hotkey {

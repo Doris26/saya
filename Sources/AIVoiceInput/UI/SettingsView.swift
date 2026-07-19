@@ -70,6 +70,20 @@ private struct GeneralSettingsTab: View {
                     get: { settings.launchAtLogin },
                     set: { settings.launchAtLogin = $0 }
                 ))
+                Toggle("显示录音浮层(屏幕底部)", isOn: Binding(
+                    get: { settings.showHUD },
+                    set: { settings.showHUD = $0; coordinator.applyHUDSetting() }
+                ))
+            }
+            Section("用量 / 花费") {
+                let usage = coordinator.usageSummary
+                LabeledContent("本月", value: String(
+                    format: "%.0f 分钟 · ¥%.2f($%.3f)",
+                    usage.monthMinutes, usage.monthCostCNY, usage.monthCostUSD))
+                LabeledContent("今日", value: String(
+                    format: "%.0f 分钟 · ¥%.2f", usage.todayMinutes, usage.todayCostCNY))
+                Text("按音频时长 × 分钟价记账(gpt-4o-transcribe $0.006/min、mini $0.003/min);¥ 按约 7.2 汇率展示。记录存 ~/Library/Application Support/Saya/usage.jsonl。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

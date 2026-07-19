@@ -41,6 +41,14 @@ struct MenuBarView: View {
 
         Divider()
 
+        // 计费追踪:本月/今日用量与花费
+        let usage = coordinator.usageSummary
+        Text(String(format: "本月 %.0f 分钟 · ¥%.2f($%.3f)",
+                    usage.monthMinutes, usage.monthCostCNY, usage.monthCostUSD))
+        Text(String(format: "今日 %.0f 分钟 · ¥%.2f", usage.todayMinutes, usage.todayCostCNY))
+
+        Divider()
+
         SettingsLink { Text("设置…") }
             .keyboardShortcut(",")
 
