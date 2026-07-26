@@ -6,6 +6,10 @@
 
 > Built for **mixing English and 中文 in one breath** — a sentence like "帮我 review this PR then merge 到 main" transcribes cleanly. **Pay-as-you-go at ~$0.006/min** — 30 minutes of dictation a day runs about **$5/month**, with no subscription and no monthly fee.
 
+![Saya UI preview — menu-bar dropdown and the recording overlay](docs/preview.png)
+
+<sub>UI preview rendered from Saya's actual SwiftUI components.</sub>
+
 ## Why Saya
 
 | | Saya | Subscription dictation apps (e.g. Wispr Flow) |
